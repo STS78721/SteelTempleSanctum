@@ -1,0 +1,30 @@
+// SteelTemple Sanctum's Windows resources: the icon (tools/make_icon.py), the manifest, the version shown in
+// Explorer's Details tab.
+#include <winver.h>
+
+1 ICON "sanctum.ico"
+1 24 "sanctum.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,3,0,0
+PRODUCTVERSION 0,3,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "SteelTemple"
+      VALUE "FileDescription", "SteelTemple Sanctum"
+      VALUE "ProductName", "SteelTemple Sanctum"
+      VALUE "FileVersion", "0.3.0"
+      VALUE "ProductVersion", "0.3.0"
+      VALUE "OriginalFilename", "SteelTemple-Sanctum.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

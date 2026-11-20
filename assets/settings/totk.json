@@ -1,0 +1,1897 @@
+{
+ "port": "totk",
+ "ini": "totk.ini",
+ "prefix": "TOTK_",
+ "read_from": "7b0e4dd (2026-11-16, Migrate updater and README to GitLab (steeltemplesaint-recomps))",
+ "pages": [
+  {
+   "title": "Graphics Settings",
+   "rows": [
+    {
+     "label": "Fullscreen",
+     "type": "toggle",
+     "desc": "Fills the screen with the game; F11 toggles it.",
+     "inverted": false,
+     "key": "FULLSCREEN",
+     "ini": "fullscreen",
+     "section": "display",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Presentation",
+     "type": "choice",
+     "names": [
+      "Mailbox",
+      "VSync",
+      "Immediate"
+     ],
+     "desc": "How finished frames reach the screen.",
+     "key": "VK_PRESENT",
+     "ini": "vk_present",
+     "section": "display",
+     "default": "mailbox",
+     "live": true,
+     "values": [
+      "mailbox",
+      "fifo",
+      "immediate"
+     ]
+    },
+    {
+     "label": "Performance overlay",
+     "type": "choice",
+     "names": [
+      "Off",
+      "FPS",
+      "Full"
+     ],
+     "desc": "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and memory load, temperatures and the render thread's waits. F10 cycles the modes.",
+     "key": "PERF_OVERLAY",
+     "ini": "perf_overlay",
+     "section": "display",
+     "default": "off",
+     "live": true,
+     "values": [
+      "off",
+      "fps",
+      "full"
+     ]
+    },
+    {
+     "label": "Picture shape",
+     "type": "choice",
+     "names": [
+      "Black bars",
+      "Stretch"
+     ],
+     "desc": "When the window's shape differs from the game resolution's (a 16:9 picture on a 21:9 screen): keep the picture's shape with black bars, or stretch it over the window.",
+     "key": "ASPECT",
+     "ini": "aspect",
+     "section": "display",
+     "default": "fit",
+     "live": true,
+     "values": [
+      "fit",
+      "stretch"
+     ]
+    },
+    {
+     "label": "Movie shape",
+     "type": "choice",
+     "names": [
+      "Black bars",
+      "Stretch"
+     ],
+     "desc": "When the game resolution is not 16:9, keep the cutscene movies' own shape with black bars, or stretch them over the whole picture. Applies from the next movie.",
+     "key": "MOVIE_ASPECT",
+     "ini": "movie_aspect",
+     "section": "display",
+     "default": "keep",
+     "live": true,
+     "values": [
+      "keep",
+      "stretch"
+     ]
+    },
+    {
+     "label": "Field of view",
+     "type": "slider",
+     "lo": 70.0,
+     "hi": 140.0,
+     "desc": "How much of the world the camera shows, in percent of the game's own. Game version 1.4.3 only.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "FOV",
+     "ini": "fov",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Dynamic resolution",
+     "type": "toggle",
+     "desc": "Lets the game lower the 3D scene to 90 or 80 %. It judges by an estimate made for the Switch that ignores your GPU, so wide scenes drop even on a fast PC. Off keeps the render scale.",
+     "inverted": false,
+     "key": "DYNAMIC_RES",
+     "ini": "dynamic_res",
+     "section": "display",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Upscaler",
+     "type": "choice",
+     "values": [
+      "dlss",
+      "fsr4",
+      "xess",
+      "fsr",
+      "bilinear"
+     ],
+     "names": [
+      "dlss_title",
+      "AMD FSR 4.1.2",
+      "xess_title",
+      "AMD FSR 1.0",
+      "Bilinear (Off)"
+     ],
+     "desc": "3D scene and window upscaler: NVIDIA DLSS 4.5, AMD FSR 4.1.2, AMD FSR 1.0, or Bilinear. Applies at once.",
+     "key": "UPSCALER",
+     "ini": "upscaler",
+     "section": "display",
+     "default": "fsr",
+     "live": true
+    },
+    {
+     "label": "Upscaler quality preset",
+     "type": "choice",
+     "values": [
+      "1280x720",
+      "1600x900",
+      "1920x1080",
+      "2560x1440"
+     ],
+     "names": [
+      "960 (1x)",
+      "1920 (2x)",
+      "2880 (3x)",
+      "3840 (4x)"
+     ],
+     "desc": "Picks the 3D render scale for the upscaler (DLSS, Intel XeSS, or AMD FSR): Quality 67 %, Balanced 58 %, Performance 50 %, Ultra Performance 33 %, Native 100 %. Changes apply at restart without overriding your chosen DLSS model generation.",
+     "key": "UPSCALER_PRESET",
+     "ini": "upscaler_preset",
+     "section": "display",
+     "default": "native",
+     "live": false
+    },
+    {
+     "label": "DLSS model",
+     "type": "choice",
+     "values": [
+      "cnn",
+      "transformer_gen1",
+      "transformer_gen2"
+     ],
+     "names": [
+      "CNN (DLSS 3)",
+      "Transformer Gen 1 (DLSS 4)",
+      "Transformer Gen 2 (DLSS 4.5)"
+     ],
+     "desc": "Selects the NVIDIA DLSS model generation and automatically uses NVIDIA's industry-standard recommended preset for your chosen resolution scale. CNN (DLSS 3) uses Preset E (Quality/Balanced/Performance) and Preset F (DLAA/Ultra Performance) on all RTX GPUs. Transformer Gen 1 (DLSS 4) uses Preset K on all scales and RTX GPUs. Transformer Gen 2 (DLSS 4.5) uses Preset M (DLAA..Performance) and Preset L (Ultra Performance) and requires FP8 Tensor Cores (RTX 40/50 Series; falls back to Gen 1 Preset K on RTX 20/30). Applies at once.",
+     "key": "DLSS_PRESET",
+     "ini": "dlss_preset",
+     "section": "display",
+     "default": "transformer_gen1",
+     "live": true
+    },
+    {
+     "label": "DLSS character trails",
+     "type": "choice",
+     "names": [
+      "Off",
+      "Light",
+      "Medium",
+      "Full"
+     ],
+     "desc": "Reduces the faint trails behind moving characters, animals and what they hold: DLSS takes less of the previous frames there. Stronger removes more of the trails and leaves those edges a little less smooth. Applies at once.",
+     "key": "DLSS_CHAR_MASK",
+     "ini": "dlss_char_mask",
+     "section": "display",
+     "default": "65",
+     "live": true,
+     "values": [
+      "0",
+      "35",
+      "65",
+      "100"
+     ]
+    },
+    {
+     "label": "Intel XeSS Quality Preset",
+     "type": "choice",
+     "values": [
+      "ultra_quality_plus",
+      "ultra_quality",
+      "quality",
+      "balanced",
+      "performance",
+      "ultra_performance",
+      "aa"
+     ],
+     "names": [
+      "Ultra Quality Plus (1.3x - Maximum Clarity)",
+      "Ultra Quality (1.5x - High Fidelity)",
+      "Quality (1.7x - Balanced AI - Recommended)",
+      "Balanced (2.0x - Performance Boost)",
+      "Performance (2.3x - High Framerate)",
+      "Ultra Performance (3.0x - Maximum FPS)",
+      "Native AA (1.0x - Anti-Aliasing Only)"
+     ],
+     "desc": "Picks the Intel XeSS super sampling mode: Ultra Quality Plus (1.3x), Ultra Quality (1.5x), Quality (1.7x), Balanced (2.0x), Performance (2.3x), Ultra Performance (3.0x), or Native AA (1.0x). Accelerated by XMX AI matrix engines on Intel Arc, or universal DP4a vector neural instructions on other GPUs.",
+     "key": "XESS_QUALITY",
+     "ini": "xess_quality",
+     "section": "display",
+     "default": "quality",
+     "live": true
+    },
+    {
+     "label": "FSR sharpness",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Sharpening after FSR scaling; 0 turns it off.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "SHARPNESS",
+     "ini": "sharpness",
+     "section": "display",
+     "default": "80",
+     "live": true
+    },
+    {
+     "label": "Game anti-aliasing (FXAA)",
+     "type": "toggle",
+     "desc": "The game's own FXAA edge smoothing. It blurs fine detail a little; with DLAA on it is not needed.",
+     "inverted": false,
+     "key": "FXAA",
+     "ini": "fxaa",
+     "section": "display",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Frame Generation",
+     "type": "choice",
+     "values": [
+      "off",
+      "dlss_fg",
+      "xefg",
+      "fsr3_fg",
+      "fsr4_fg"
+     ],
+     "names": [
+      "Off",
+      "NVIDIA DLSS Frame Gen (RTX 40+)",
+      "Intel Xe Frame Gen - XeFG (Arc)",
+      "AMD FSR 3.1 Frame Gen (Universal)",
+      "AMD FSR 4 AI Frame Gen (RDNA4+)"
+     ],
+     "desc": "Generates interpolated frames between rendered frames to multiply smoothness. NVIDIA DLSS Frame Gen requires RTX 40/50 Series Optical Flow and pairs with NVIDIA Reflex (On + Boost). Intel XeFG supports up to 4x with libxess_fg.dll. AMD FSR 3.1 Frame Gen works on all GPUs and pairs with AMD Anti-Lag 2. AMD FSR 4 AI Frame Gen requires AMD Radeon RX 9000 Series.",
+     "key": "FG_MODE",
+     "ini": "fg_mode",
+     "section": "display",
+     "default": "off",
+     "live": true
+    },
+    {
+     "label": "DLSS Frame Gen preset",
+     "type": "choice",
+     "values": [
+      "preset_a",
+      "preset_b",
+      "preset_c"
+     ],
+     "names": [
+      "DLSS FG Transformer (Preset A)",
+      "DLSS FG Optical Flow (Preset B)",
+      "DLSS FG Low Motion Blur (Preset C)"
+     ],
+     "desc": "Selects the NVIDIA DLSS Frame Generation neural profile: Preset A (Transformer optical flow, sharpest HUD & motion stability), Preset B (Balanced optical flow for fast camera pans), or Preset C (Low motion blur / ultra-clean disocclusion).",
+     "key": "FG_PRESET",
+     "ini": "fg_preset",
+     "section": "display",
+     "default": "preset_a",
+     "live": true
+    },
+    {
+     "label": "Frame Gen multiplier",
+     "type": "choice",
+     "values": [
+      "2x",
+      "3x",
+      "4x",
+      "6x"
+     ],
+     "names": [
+      "2x (Standard FG - Double FPS)",
+      "3x (Triple Frame Synthesis)",
+      "4x (Quad Frame Synthesis)",
+      "6x (MFG - RTX 50 Series)"
+     ],
+     "desc": "Number of presented frames per rendered frame. 2x is supported on all Frame Gen GPUs (RTX 40 / 50 series and FSR Frame Gen). 4x and 6x Multi-Frame Generation (MFG) require an NVIDIA GeForce RTX 50 Series (Blackwell) GPU.",
+     "key": "FG_MULT",
+     "ini": "fg_mult",
+     "section": "display",
+     "default": "2x",
+     "live": true
+    },
+    {
+     "label": "Frame Gen multiplier",
+     "type": "choice",
+     "values": [
+      "2x",
+      "3x",
+      "4x",
+      "6x"
+     ],
+     "names": [
+      "2x (Standard FG - Double FPS)",
+      "3x (Triple Frame Synthesis)",
+      "4x (Quad Frame Synthesis)",
+      "6x (MFG - RTX 50 Series)"
+     ],
+     "desc": "Number of presented frames per rendered frame. 2x is supported on all Frame Gen GPUs (RTX 40 / 50 series and FSR Frame Gen). 4x and 6x Multi-Frame Generation (MFG) require an NVIDIA GeForce RTX 50 Series (Blackwell) GPU.",
+     "key": "FG_MULT",
+     "ini": "fg_mult",
+     "section": "display",
+     "default": "2x",
+     "live": true
+    },
+    {
+     "label": "NVIDIA Reflex Low Latency",
+     "type": "choice",
+     "values": [
+      "off",
+      "on",
+      "boost"
+     ],
+     "names": [
+      "Off",
+      "On",
+      "On + Boost"
+     ],
+     "desc": "Synchronises CPU simulation and GPU submission via VK_NV_low_latency2 to eliminate the render queue and minimize input lag. Automatically guided to On + Boost when DLSS Frame Generation is enabled.",
+     "key": "REFLEX",
+     "ini": "reflex",
+     "section": "display",
+     "default": "off",
+     "live": false
+    },
+    {
+     "label": "AMD Anti-Lag 2",
+     "type": "choice",
+     "values": [
+      "off",
+      "on"
+     ],
+     "names": [
+      "Off",
+      "On"
+     ],
+     "desc": "Synchronises CPU frame pacing with GPU execution via VK_AMD_anti_lag to minimize click-to-photon latency. Automatically guided to On when AMD FSR 3.1 or FSR 4 AI Frame Generation is enabled.",
+     "key": "ANTILAG2",
+     "ini": "antilag2",
+     "section": "display",
+     "default": "on",
+     "live": true
+    },
+    {
+     "label": "Intel Xe Low Latency (XeLL)",
+     "type": "choice",
+     "values": [
+      "off",
+      "on",
+      "boost"
+     ],
+     "names": [
+      "Off",
+      "On",
+      "On + Boost"
+     ],
+     "desc": "Intel Xe Low Latency frame pacing for Intel Arc and Iris Xe graphics. Dynamically synchronizes render dispatch and presentation to reduce click-to-photon latency.",
+     "key": "XELL",
+     "ini": "xell",
+     "section": "display",
+     "default": "off",
+     "live": true
+    },
+    {
+     "label": "Soft shadows",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 200.0,
+     "desc": "Sun shadows sharp where an object meets the ground and softer the further the shadow falls (PCSS). 0 keeps the game's filter. Takes effect at the next start.",
+     "step": 10.0,
+     "fmt": "%.0f %%",
+     "key": "PCSS",
+     "ini": "pcss",
+     "section": "display",
+     "default": "0",
+     "live": false
+    },
+    {
+     "label": "Contact shadows",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Small sun shadows the shadow maps miss: at feet, under stones, in grass and creases. Traced on the screen after lighting. Applies at once.",
+     "step": 10.0,
+     "fmt": "%.0f %%",
+     "key": "CONTACT_SHADOWS",
+     "ini": "contact_shadows",
+     "section": "display",
+     "default": "0",
+     "live": true
+    },
+    {
+     "label": "Texture filtering",
+     "type": "choice",
+     "values": [
+      "game",
+      "2",
+      "4",
+      "8",
+      "16"
+     ],
+     "names": [
+      "Game",
+      "2x",
+      "4x",
+      "8x",
+      "16x"
+     ],
+     "desc": "Anisotropic filtering of surface textures: ground, roads and walls seen at a shallow angle stay sharp into the distance instead of blurring. Game: the level the game asks for, as on the Switch.",
+     "key": "ANISO",
+     "ini": "aniso",
+     "section": "display",
+     "default": "game",
+     "live": false
+    },
+    {
+     "type": "group",
+     "label": "Colour"
+    },
+    {
+     "label": "Colour profile",
+     "type": "choice",
+     "names": [
+      "Game's own",
+      "Vivid (OLED)",
+      "Clarity",
+      "Custom"
+     ],
+     "desc": "Sets the four values below. Vivid: more contrast and saturation, shadows opened a little (made for OLED screens). Clarity: a little more contrast, saturation and brightness. Moving a value makes the profile Custom. The HUD changes with the picture; this menu does not.",
+     "key": "COLOR_PRESET",
+     "ini": "color_preset",
+     "section": "display",
+     "default": "default",
+     "live": true,
+     "values": [
+      "default",
+      "vivid",
+      "clarity",
+      "custom"
+     ]
+    },
+    {
+     "label": "Brightness",
+     "type": "slider",
+     "lo": -30.0,
+     "hi": 30.0,
+     "desc": "Added to every colour; 0 leaves it.",
+     "step": 1.0,
+     "fmt": "%+.0f %%",
+     "key": "COLOR_BRIGHTNESS",
+     "ini": "color_brightness",
+     "section": "display",
+     "default": "0",
+     "live": true
+    },
+    {
+     "label": "Contrast",
+     "type": "slider",
+     "lo": 70.0,
+     "hi": 150.0,
+     "desc": "Spreads colours away from mid-grey (above 100 %) or towards it; 100 % leaves them.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "COLOR_CONTRAST",
+     "ini": "color_contrast",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Saturation",
+     "type": "slider",
+     "lo": 50.0,
+     "hi": 200.0,
+     "desc": "Colour strength against grey; 100 % leaves it.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "COLOR_SATURATION",
+     "ini": "color_saturation",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Gamma",
+     "type": "slider",
+     "lo": 0.8,
+     "hi": 1.2,
+     "desc": "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+     "step": 0.02,
+     "fmt": "%.2f",
+     "key": "COLOR_GAMMA",
+     "ini": "color_gamma",
+     "section": "display",
+     "default": "1",
+     "live": true
+    },
+    {
+     "label": "HDR output",
+     "type": "toggle",
+     "desc": "Bright highlights on an HDR display. Needs HDR turned on in Windows (\"Use HDR\") or in a Wayland compositor with colour management; without it the picture stays SDR. Applies after a restart. The colour profile above is for SDR and is not used in HDR.",
+     "inverted": false,
+     "key": "HDR",
+     "ini": "hdr",
+     "section": "display",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Peak brightness",
+     "type": "slider",
+     "lo": 400.0,
+     "hi": 10000.0,
+     "desc": "Your display's peak in nits; the brightest highlights stop there.",
+     "step": 50.0,
+     "fmt": "%.0f",
+     "key": "HDR_PEAK_NITS",
+     "ini": "hdr_peak_nits",
+     "section": "display",
+     "default": "1000",
+     "live": true
+    },
+    {
+     "label": "Game brightness",
+     "type": "slider",
+     "lo": 80.0,
+     "hi": 500.0,
+     "desc": "Nits of the picture's white (paper white). 203 is the HDR reference; raise it in a bright room.",
+     "step": 5.0,
+     "fmt": "%.0f",
+     "key": "HDR_GAME_NITS",
+     "ini": "hdr_game_nits",
+     "section": "display",
+     "default": "203",
+     "live": true
+    },
+    {
+     "label": "HUD and menu brightness",
+     "type": "slider",
+     "lo": 80.0,
+     "hi": 500.0,
+     "desc": "Nits of the HUD's and this menu's white.",
+     "step": 5.0,
+     "fmt": "%.0f",
+     "key": "HDR_UI_NITS",
+     "ini": "hdr_ui_nits",
+     "section": "display",
+     "default": "203",
+     "live": true
+    },
+    {
+     "label": "Highlight hue correction",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Bright colours such as fire and sparks turn towards white as in the game's own SDR picture, matching the light they cast; 0 keeps them fully saturated.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "HDR_HUE",
+     "ini": "hdr_hue",
+     "section": "display",
+     "default": "80",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "DLSS NR",
+   "rows": [
+    {
+     "type": "group",
+     "label": "NVIDIA DLSS Neural Rendering (DLSS NR)"
+    },
+    {
+     "label": "DLSS NR (Neural Rendering)",
+     "type": "toggle",
+     "desc": "Enables NVIDIA DLSS Neural Rendering pass (Pre-SR neural inference). Evaluates scene lighting and depth-guided motion vectors through the 165 MB tensor network.",
+     "inverted": false,
+     "key": "DLSS_NR",
+     "ini": "dlss_nr",
+     "section": "display",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Neural Rendering Preset",
+     "type": "choice",
+     "values": [
+      "preset_b",
+      "preset_a",
+      "auto"
+     ],
+     "names": [
+      "Preset B (Fast Neural Model - Forced / Recommended)",
+      "Preset A (Standard Neural Model)",
+      "Automatic Selection"
+     ],
+     "desc": "Operational model profile. Preset B is forced by default for vastly superior frame rates and minimal latency overhead compared to older models.",
+     "key": "DLSS_NR_PRESET",
+     "ini": "dlss_nr_preset",
+     "section": "display",
+     "default": "preset_b",
+     "live": true
+    },
+    {
+     "label": "Multipass System",
+     "type": "choice",
+     "values": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "names": [
+      "1x Pass (Standard Pre-SR Neural Pass - Recommended)",
+      "2x Passes (Dual Sequential AI Passes)",
+      "3x Passes (Triple Sequential AI Passes)",
+      "4x Passes (Quad Sequential AI Passes - Extreme Fidelity)"
+     ],
+     "desc": "Runs multiple sequential neural rendering passes before Super Resolution upscaling (OptiScaler Pre-SR Multipass).",
+     "key": "DLSS_NR_PASSES",
+     "ini": "dlss_nr_passes",
+     "section": "display",
+     "default": "1",
+     "live": true
+    },
+    {
+     "label": "Neural Working Scale",
+     "type": "choice",
+     "values": [
+      "auto",
+      "1.0",
+      "0.85",
+      "0.75",
+      "0.5"
+     ],
+     "names": [
+      "Auto (Native Working Resolution)",
+      "1.0 (Full Quality - 100% Native Scale)",
+      "0.85 (Balanced Fidelity)",
+      "0.75 (High Performance)",
+      "0.5 (Maximum Performance - 4x Faster)"
+     ],
+     "desc": "Controls internal resolution scale at which the neural model operates (OptiScaler WorkingScale). Performance cost scales with the square of this value; 0.5-0.75 gives huge FPS boosts.",
+     "key": "DLSS_NR_SCALE",
+     "ini": "dlss_nr_scale",
+     "section": "",
+     "default": "auto",
+     "live": true
+    },
+    {
+     "label": "Neural Colour Strength",
+     "type": "choice",
+     "values": [
+      "0.0",
+      "0.25",
+      "0.5",
+      "0.75",
+      "1.0"
+     ],
+     "names": [
+      "0.0 (Native Game Palette - Zero Tint)",
+      "0.25 (Subtle Neural Grading)",
+      "0.5 (Balanced Neural Color)",
+      "0.75 (Vibrant AI Transfer)",
+      "1.0 (Full AI Neural Synthesis)"
+     ],
+     "desc": "Balances AI synthesized color against native frame color (OptiScaler ColourStrength). Setting to 0.0 retains native game grading and prevents desaturation.",
+     "key": "DLSS_NR_COLOR",
+     "ini": "dlss_nr_color",
+     "section": "",
+     "default": "0.0",
+     "live": true
+    },
+    {
+     "label": "Neural Transfer Strength",
+     "type": "choice",
+     "values": [
+      "auto",
+      "1.0",
+      "0.75",
+      "0.5"
+     ],
+     "names": [
+      "Auto (Dynamic Transfer Pacing)",
+      "1.0 (Full Blend)",
+      "0.75 (Balanced Blend)",
+      "0.5 (Soft Transfer)"
+     ],
+     "desc": "Fine-tunes the blending strength of the neural pass back into the frame pipeline (OptiScaler TransferStrength).",
+     "key": "DLSS_NR_TRANSFER",
+     "ini": "dlss_nr_transfer",
+     "section": "",
+     "default": "auto",
+     "live": true
+    },
+    {
+     "label": "Neural Detail Sharpness",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Post-reconstruction neural sharpening filter and micro-contrast enhancement (0 to 100 %).",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "DLSS_NR_SHARPNESS",
+     "ini": "dlss_nr_sharpness",
+     "section": "display",
+     "default": "80",
+     "live": true
+    },
+    {
+     "type": "group",
+     "label": "Motion Vector Velocity Overlay (Debug)"
+    },
+    {
+     "label": "Motion Vector Velocity Overlay (Debug)",
+     "type": "toggle",
+     "desc": "Visualizes live 2D motion vectors on screen (red/green velocity vectors, grey stationary). Verifies camera reprojection and depth-guided hybrid character tracking.",
+     "inverted": false,
+     "key": "MV_DEBUG",
+     "ini": "mv_debug",
+     "section": "display",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Game",
+   "rows": [
+    {
+     "label": "Frame queue",
+     "type": "toggle",
+     "desc": "The game starts a frame while the previous one waits for its turn on screen: far fewer dropped frames at the limit, up to one frame more input delay. Applies at once.",
+     "inverted": false,
+     "key": "FRAME_QUEUE",
+     "ini": "frame_queue",
+     "section": "frame rate",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Console mode",
+     "type": "choice",
+     "names": [
+      "Docked",
+      "Handheld"
+     ],
+     "desc": "Whether the game thinks it runs docked or handheld.",
+     "key": "OPERATION_MODE",
+     "ini": "operation_mode",
+     "section": "language",
+     "default": "docked",
+     "live": false,
+     "values": [
+      "docked",
+      "handheld"
+     ]
+    },
+    {
+     "label": "Keep running out of focus",
+     "type": "toggle",
+     "desc": "On (the default), the game keeps running while you are in another window, and the keyboard stays quiet until the window is in front again. Off, it pauses when its window loses focus, as on the Switch when Home is pressed; a load interrupted that way can stop for good.",
+     "inverted": false,
+     "key": "ASSUME_FOCUS",
+     "ini": "assume_focus",
+     "section": "display",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Sound",
+   "rows": [
+    {
+     "label": "Volume",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Master volume of the game.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "VOLUME",
+     "ini": "volume",
+     "section": "audio",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Speakers",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Stereo",
+      "5.1 surround"
+     ],
+     "desc": "Stereo or 5.1 surround output. Automatic picks 5.1 when the Windows speaker setup has six or more channels. Applies after a restart.",
+     "key": "AUDIO_CHANNELS",
+     "ini": "audio_channels",
+     "section": "audio",
+     "default": "stereo",
+     "live": false,
+     "values": [
+      "auto",
+      "stereo",
+      "5.1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Controls",
+   "rows": [
+    {
+     "label": "Button layout",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Nintendo (A right)",
+      "Xbox (A bottom)"
+     ],
+     "desc": "Which button is A. Nintendo: the right one, as on a Switch. Xbox: the bottom one, as labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks Nintendo for controllers with Nintendo labels and Xbox for the others. Which controller the game's prompts show is set under Button prompts.",
+     "key": "PAD_LAYOUT",
+     "ini": "pad_layout",
+     "section": "input",
+     "default": "auto",
+     "live": true,
+     "values": [
+      "auto",
+      "nintendo",
+      "xbox"
+     ]
+    },
+    {
+     "label": "Button prompts",
+     "type": "choice",
+     "names": [
+      "Nintendo",
+      "Xbox",
+      "PlayStation 5 (DualSense)",
+      "PlayStation 4 (DualShock)",
+      "PC"
+     ],
+     "desc": "Which controller's buttons the game's prompts show. Nintendo: the game's own. Xbox: LB, RB, LT, RT, Menu, View and a d-pad cross, and A, B, X and Y as labelled on the button the layout above presses (with Nintendo (A right) the right button is labelled B, so the prompts for A show B). PC: the keys and mouse buttons of the keyboard's default layout (E, Shift, Space, left click...) and the mouse for the camera. The game reads its prompts at start, so they change after a restart. They are part of the game's files, so a button you remap in Controls keeps its old prompt on screen.",
+     "key": "PROMPTS",
+     "ini": "prompts",
+     "section": "input",
+     "default": "nintendo",
+     "live": false,
+     "values": [
+      "nintendo",
+      "xbox",
+      "dualsense",
+      "dualshock4",
+      "pc"
+     ]
+    },
+    {
+     "label": "PS4/PS5 touchpad menu toggle",
+     "type": "toggle",
+     "desc": "Pressing the PlayStation DualSense (PS5) or DualShock 4 (PS4) touchpad opens or closes this settings menu.",
+     "inverted": false,
+     "key": "TOUCHPAD_MENU",
+     "ini": "touchpad_menu",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Motion controls",
+     "type": "toggle",
+     "desc": "Aiming with the controller's gyroscope.",
+     "inverted": false,
+     "key": "MOTION",
+     "ini": "motion",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Vibration strength",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 300.0,
+     "desc": "How strong the controller vibrates.",
+     "step": 10.0,
+     "fmt": "%.0f %%",
+     "key": "RUMBLE_STRENGTH",
+     "ini": "rumble_strength",
+     "section": "input",
+     "default": "130",
+     "live": true
+    },
+    {
+     "label": "Vibration curve",
+     "type": "slider",
+     "lo": 0.2,
+     "hi": 1.5,
+     "desc": "Lower values make weak vibration stronger.",
+     "step": 0.05,
+     "fmt": "%.2f",
+     "key": "RUMBLE_CURVE",
+     "ini": "rumble_curve",
+     "section": "input",
+     "default": "0.6",
+     "live": true
+    },
+    {
+     "label": "Trigger vibration (Xbox)",
+     "type": "toggle",
+     "desc": "Vibrates the triggers of an Xbox controller too.",
+     "inverted": false,
+     "key": "RUMBLE_TRIGGERS",
+     "ini": "rumble_triggers",
+     "section": "input",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "PlayStation 5 DualSense"
+    },
+    {
+     "label": "DualSense enhancements (Experimental)",
+     "type": "toggle",
+     "desc": "Enables adaptive triggers, voice-coil haptics, and controller speaker sound. Experimental - keep off unless using a Sony PS5 DualSense controller.",
+     "inverted": false,
+     "key": "DUALSENSE",
+     "ini": "dualsense",
+     "section": "input",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Adaptive triggers",
+     "type": "toggle",
+     "desc": "Simulates bowstring tension and shield bracing resistance on L2/R2 triggers.",
+     "inverted": false,
+     "key": "DUALSENSE_TRIGGERS",
+     "ini": "dualsense_triggers",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Trigger resistance strength",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Adjusts how strong the adaptive trigger resistance pushes back.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "DUALSENSE_TRIGGER_STRENGTH",
+     "ini": "dualsense_trigger_strength",
+     "section": "input",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Controller speaker sound",
+     "type": "toggle",
+     "desc": "Plays arrow shots, shield parries, melee hits, chest fanfares, and fast travel chimes through the controller speaker.",
+     "inverted": false,
+     "key": "DUALSENSE_AUDIO",
+     "ini": "dualsense_audio",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Controller speaker volume",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 150.0,
+     "desc": "Volume of the built-in controller speaker.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "DUALSENSE_VOL",
+     "ini": "dualsense_vol",
+     "section": "input",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Voice-coil haptics",
+     "type": "toggle",
+     "desc": "Drives the controller voice coils with physical audio waveforms in sync with sound effects.",
+     "inverted": false,
+     "key": "DUALSENSE_HAPTICS",
+     "ini": "dualsense_haptics",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Mouse camera",
+     "type": "choice",
+     "names": [
+      "Stick emulation",
+      "Direct"
+     ],
+     "desc": "Direct: the camera turns by how far the mouse moves, as in a PC game, with no stick dead zone or curve (games 1.4.3 and 1.2.1; 1.1.0 uses stick emulation). Stick emulation: the mouse acts as the right stick.",
+     "key": "MOUSE_MODE",
+     "ini": "mouse_mode",
+     "section": "input",
+     "default": "direct",
+     "live": true,
+     "values": [
+      "stick",
+      "direct"
+     ]
+    },
+    {
+     "label": "Mouse camera sensitivity",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 10.0,
+     "desc": "How fast the mouse turns the camera.",
+     "step": 0.1,
+     "fmt": "%.1f",
+     "key": "MOUSE_SENS",
+     "ini": "mouse_sens",
+     "section": "input",
+     "default": "1",
+     "live": true
+    },
+    {
+     "label": "Mouse in the game's menus",
+     "type": "toggle",
+     "desc": "In the game's own menus (title, inventory, shops, dialogue choices) the pointer shows: the item under it is selected, left click confirms, right click goes back. Only after the mouse or a key was used last, so a gamepad sees the menus unchanged (game 1.4.3).",
+     "inverted": false,
+     "key": "MENU_CURSOR",
+     "ini": "menu_cursor",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Left click on the map",
+     "type": "toggle",
+     "desc": "On the Purah Pad's map, the left mouse button presses A at the map's cursor instead of the button it is bound to (Y by default). Needs Mouse in the game's menus (game 1.4.3).",
+     "inverted": false,
+     "key": "MAP_CLICK",
+     "ini": "map_click",
+     "section": "input",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Clicks in dialogue",
+     "type": "toggle",
+     "desc": "While a dialogue box is open, left click presses B (it continues the text and skips its scroll) and right click presses A, instead of the buttons they are bound to (Y by default, which opens the dialogue log, and ZL). Dialogue choices keep the pointer: left click picks (game 1.4.3).",
+     "inverted": false,
+     "key": "DIALOGUE_CLICK",
+     "ini": "dialogue_click",
+     "section": "input",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Walk scale",
+     "type": "slider",
+     "lo": 0.2,
+     "hi": 0.9,
+     "desc": "The tilt the keyboard's sticks get while the walk key is held. Half is a walk, the full tilt a run.",
+     "step": 0.01,
+     "fmt": "%.2f",
+     "key": "WALK_SCALE",
+     "ini": "walk_scale",
+     "section": "input",
+     "default": "0.51",
+     "live": true
+    },
+    {
+     "type": "group",
+     "label": "Analog sticks"
+    },
+    {
+     "label": "Left stick dead zone",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 50.0,
+     "desc": "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own: let go of the stick, read \"stick now\" and set the dead zone a few percent above it.",
+     "step": 1.0,
+     "fmt": "%.0f %%",
+     "key": "LSTICK_DEADZONE",
+     "ini": "lstick_deadzone",
+     "section": "input",
+     "default": "",
+     "live": true
+    },
+    {
+     "label": "Right stick dead zone",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 50.0,
+     "desc": "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own: let go of the stick, read \"stick now\" and set the dead zone a few percent above it.",
+     "step": 1.0,
+     "fmt": "%.0f %%",
+     "key": "RSTICK_DEADZONE",
+     "ini": "rstick_deadzone",
+     "section": "input",
+     "default": "",
+     "live": true
+    },
+    {
+     "label": "Stick camera speed",
+     "type": "slider",
+     "lo": 0.1,
+     "hi": 3.0,
+     "desc": "Multiplies the game's own right-stick camera speed, top speed included, at each of the game's five camera sensitivities. The mouse keeps its own setting.",
+     "step": 0.05,
+     "fmt": "%.2f",
+     "key": "STICK_SENS",
+     "ini": "stick_sens",
+     "section": "input",
+     "default": "1",
+     "live": false
+    }
+   ]
+  },
+  {
+   "title": "Menu",
+   "rows": [
+    {
+     "label": "Menu theme",
+     "type": "choice",
+     "names": [
+      "Tears of the Kingdom",
+      "Dark",
+      "Light"
+     ],
+     "desc": "Appearance of the settings menu: Tears of the Kingdom (Zonai/Hylian styling), Dark, or Light.",
+     "key": "MENU_THEME",
+     "ini": "menu_theme",
+     "section": "language",
+     "default": "totk",
+     "live": true,
+     "values": [
+      "totk",
+      "dark",
+      "light"
+     ]
+    },
+    {
+     "label": "Menu language",
+     "type": "choice",
+     "names": [
+      "Automatic (from Windows)",
+      "English",
+      "Русский",
+      "Português (Brasil)",
+      "简体中文"
+     ],
+     "desc": "Language of this menu and the overlay.",
+     "key": "MENU_LANG",
+     "ini": "menu_lang",
+     "section": "language",
+     "default": "",
+     "live": true,
+     "values": [
+      "",
+      "en",
+      "ru",
+      "pt-BR",
+      "zh-Hans"
+     ]
+    },
+    {
+     "label": "Discord Rich Presence",
+     "type": "toggle",
+     "desc": "Shows \"Playing TotK Recomp\" with the play time in your Discord status while the game runs. discord_app_id and discord_image in totk.ini choose the application.",
+     "inverted": false,
+     "key": "DISCORD_RPC",
+     "ini": "discord_rpc",
+     "section": "discord",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Advanced",
+   "rows": [
+    {
+     "type": "group",
+     "label": "Scheduling"
+    },
+    {
+     "label": "Virtual core preemption",
+     "type": "choice",
+     "names": [
+      "Off",
+      "On",
+      "Inheritance only"
+     ],
+     "desc": "Lets a game thread interrupt another one on the same virtual core.",
+     "key": "ASYNC_PREEMPT",
+     "ini": "async_preempt",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1",
+      "2"
+     ]
+    },
+    {
+     "label": "GPU frame prep on its own thread",
+     "type": "toggle",
+     "desc": "Prepares frames for the GPU on a separate thread instead of the game thread. Adds up to one frame of latency.",
+     "inverted": false,
+     "key": "REPLAY_ASYNC",
+     "ini": "replay_async",
+     "section": "performance",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "1 ms Windows timer",
+     "type": "toggle",
+     "desc": "Raises the system timer resolution to 1 ms for steadier frame pacing.",
+     "inverted": false,
+     "key": "TIMER_1MS",
+     "ini": "timer_1ms",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Shaders and pipelines"
+    },
+    {
+     "label": "Waiting draw handling",
+     "type": "choice",
+     "names": [
+      "Default",
+      "Old (draw)"
+     ],
+     "desc": "Default keeps the current scheduling with a reserved worker for waiting draws; Old (draw) uses the previous scheduling.",
+     "key": "PIPE_WAIT",
+     "ini": "pipe_wait",
+     "section": "performance",
+     "default": "default",
+     "live": false,
+     "values": [
+      "default",
+      "draw"
+     ]
+    },
+    {
+     "label": "Draws skipped while a pipeline builds",
+     "type": "choice",
+     "names": [
+      "Strict",
+      "Any",
+      "Fullscreen passes"
+     ],
+     "desc": "Which draws are dropped instead of waiting for their pipeline.",
+     "key": "PIPE_SKIP",
+     "ini": "pipe_skip",
+     "section": "performance",
+     "default": "fullscreen",
+     "live": false,
+     "values": [
+      "strict",
+      "any",
+      "fullscreen"
+     ]
+    },
+    {
+     "label": "Stage library prebuild",
+     "type": "toggle",
+     "desc": "Builds shader stage libraries ahead of time in the background.",
+     "inverted": false,
+     "key": "LIB_PREBUILD",
+     "ini": "lib_prebuild",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Pipeline prebuild",
+     "type": "toggle",
+     "desc": "Builds known pipelines ahead of time.",
+     "inverted": false,
+     "key": "PIPE_PREBUILD",
+     "ini": "pipe_prebuild",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Graphics pipeline library",
+     "type": "toggle",
+     "desc": "Uses the Vulkan pipeline library extension; turn off if your driver misbehaves with it.",
+     "inverted": false,
+     "key": "GPL",
+     "ini": "gpl",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Textures and memory"
+    },
+    {
+     "label": "ASTC texture decoding",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "GPU shader",
+      "Native",
+      "CPU"
+     ],
+     "desc": "Where compressed ASTC textures are decoded.",
+     "key": "ASTC",
+     "ini": "astc",
+     "section": "performance",
+     "default": "auto",
+     "live": false,
+     "values": [
+      "auto",
+      "gpu",
+      "native",
+      "cpu"
+     ]
+    },
+    {
+     "label": "GPU memory mode",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Import",
+      "Mirror",
+      "Verify"
+     ],
+     "desc": "How game memory is shared with the GPU.",
+     "key": "MEMORY",
+     "ini": "memory",
+     "section": "performance",
+     "default": "auto",
+     "live": false,
+     "values": [
+      "auto",
+      "import",
+      "mirror",
+      "verify"
+     ]
+    },
+    {
+     "label": "Texture aliasing",
+     "type": "toggle",
+     "desc": "A new texture created over a live texture's memory starts with that content instead of empty.",
+     "inverted": false,
+     "key": "TEX_ALIAS",
+     "ini": "tex_alias",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Texture memory limit",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Percent of video memory above which textures the game released are dropped (they come back from storage when used again). 0 keeps them.",
+     "step": 1.0,
+     "fmt": "%.0f%%",
+     "key": "TEX_VRAM_PRESSURE",
+     "ini": "tex_vram_pressure",
+     "section": "performance",
+     "default": "90",
+     "live": false
+    },
+    {
+     "label": "Compress ASTC to BC3",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Off",
+      "On"
+     ],
+     "desc": "With the GPU decoder: re-encodes decoded ASTC textures to BC3, a quarter of the video memory. Textures look slightly blockier. Auto: on for GPUs with 4 GB of video memory or less.",
+     "key": "ASTC_BC",
+     "ini": "astc_bc",
+     "section": "performance",
+     "default": "",
+     "live": false,
+     "values": [
+      "",
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Render fixes"
+    },
+    {
+     "label": "LOD guard",
+     "type": "toggle",
+     "desc": "Prevents objects flashing in the wrong place or a flat far field for a frame, by waiting for the game to finish rewriting level-of-detail data before the GPU reads it.",
+     "inverted": false,
+     "key": "LOD_GUARD",
+     "ini": "lod_guard",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Constant buffer fix",
+     "type": "toggle",
+     "desc": "Fills the driver-reserved constant bank c0 (storage sizes, dispatch size, point size, base instance) instead of reading zeros.",
+     "inverted": false,
+     "key": "FIX_C0",
+     "ini": "fix_c0",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Zero new GPU memory",
+     "type": "toggle",
+     "desc": "New GPU memory pools start zero-filled, as Switch memory does.",
+     "inverted": false,
+     "key": "FIX_ZERO",
+     "ini": "fix_zero",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Skip repeated binds",
+     "type": "toggle",
+     "desc": "Optimisation: skips bindings that did not change.",
+     "inverted": false,
+     "key": "BIND_SKIP",
+     "ini": "bind_skip",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Shader memo",
+     "type": "toggle",
+     "desc": "Optimisation: remembers shader lookups.",
+     "inverted": false,
+     "key": "SHADER_MEMO",
+     "ini": "shader_memo",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Pipeline memo",
+     "type": "toggle",
+     "desc": "Optimisation: reuses the previous draw's pipeline when its state repeats.",
+     "inverted": false,
+     "key": "PIPE_MEMO",
+     "ini": "pipe_memo",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Texture binding memo",
+     "type": "toggle",
+     "desc": "Optimisation: remembers texture descriptors between draws.",
+     "inverted": false,
+     "key": "TEX_MEMO",
+     "ini": "tex_memo",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Descriptor templates",
+     "type": "toggle",
+     "desc": "Optimisation: updates descriptors in bulk.",
+     "inverted": false,
+     "key": "DESC_TEMPLATE",
+     "ini": "desc_template",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Skip repeated push constants",
+     "type": "toggle",
+     "desc": "Optimisation: skips push constants that did not change.",
+     "inverted": false,
+     "key": "PUSH_SKIP",
+     "ini": "push_skip",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Early GPU submission",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 1000.0,
+     "desc": "Submits GPU work in parts every N draws between passes so the GPU starts earlier; 0 turns it off.",
+     "step": 8.0,
+     "fmt": "%.0f",
+     "key": "SPLIT_DRAWS",
+     "ini": "split_draws",
+     "section": "performance",
+     "default": "64",
+     "live": false
+    },
+    {
+     "type": "group",
+     "label": "Vulkan"
+    },
+    {
+     "label": "Validation layer",
+     "type": "toggle",
+     "desc": "Checks every Vulkan call and slows the game down a lot.",
+     "inverted": false,
+     "key": "VK_VALIDATION",
+     "ini": "vk_validation",
+     "section": "performance",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Dynamic vertex state",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Off",
+      "On"
+     ],
+     "desc": "Forces dynamic vertex input on or off; the default depends on the GPU.",
+     "key": "VK_DYN_VERTEX",
+     "ini": "vk_dyn_vertex",
+     "section": "performance",
+     "default": "",
+     "live": false,
+     "values": [
+      "",
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Dynamic alpha to coverage",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Off",
+      "On"
+     ],
+     "desc": "Forces dynamic alpha to coverage on or off. Default: off on AMD's driver for RDNA 2 and older, which draws characters black with it, and on Intel's Windows driver for integrated GPUs, which draws coloured noise on foliage; on elsewhere.",
+     "key": "VK_DYN_A2C",
+     "ini": "vk_dyn_a2c",
+     "section": "performance",
+     "default": "",
+     "live": false,
+     "values": [
+      "",
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Pin subgroup size",
+     "type": "toggle",
+     "desc": "Fixes the shader subgroup size.",
+     "inverted": false,
+     "key": "VK_SUBGROUP_PIN",
+     "ini": "vk_subgroup_pin",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Diagnostics"
+    },
+    {
+     "label": "Flight recorder",
+     "type": "toggle",
+     "desc": "Keeps a short history and saves it when a frame freezes.",
+     "inverted": false,
+     "key": "FLIGHT",
+     "ini": "flight",
+     "section": "diagnostics",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Freeze threshold (ms)",
+     "type": "slider",
+     "lo": 20.0,
+     "hi": 1000.0,
+     "desc": "Frame time that counts as a freeze.",
+     "step": 10.0,
+     "fmt": "%.0f",
+     "key": "FLIGHT_SPIKE_MS",
+     "ini": "flight_spike_ms",
+     "section": "diagnostics",
+     "default": "100",
+     "live": false
+    },
+    {
+     "label": "GPU pass marks",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Off",
+      "On"
+     ],
+     "desc": "After a GPU crash, the log names the render pass that was running. Automatic: AMD only. On: also NVIDIA, at a small cost.",
+     "key": "PASS_CRUMBS",
+     "ini": "pass_crumbs",
+     "section": "diagnostics",
+     "default": "",
+     "live": false,
+     "values": [
+      "",
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Mods",
+   "rows": [
+    {
+     "type": "group",
+     "label": "Built into the port"
+    },
+    {
+     "label": "Game speed follows the clock",
+     "type": "toggle",
+     "desc": "Steps the game by real time, so a slow frame does not slow the game down.",
+     "inverted": false,
+     "key": "REALTIME",
+     "ini": "realtime",
+     "section": "frame rate",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Cloth on the clock",
+     "type": "toggle",
+     "desc": "Steps cloth and hair by real time as well.",
+     "inverted": false,
+     "key": "CLOTH_REALTIME",
+     "ini": "cloth_realtime",
+     "section": "frame rate",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "High frame rate fixes",
+     "type": "toggle",
+     "desc": "Corrects physics that misbehave above 30 frames per second, and objects that stay see-through or invisible above 60.",
+     "inverted": false,
+     "key": "HIGHFPS_FIX",
+     "ini": "highfps_fix",
+     "section": "frame rate",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Climbing speed fix",
+     "type": "toggle",
+     "desc": "Keeps climbing walls and ladders at full speed above 60 frames per second, so Link reaches the top.",
+     "inverted": false,
+     "key": "CLIMB_FIX",
+     "ini": "climb_fix",
+     "section": "frame rate",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  }
+ ]
+}

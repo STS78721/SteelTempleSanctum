@@ -1,0 +1,209 @@
+{
+ "port": "dkb-bananas",
+ "ini": "dkb.ini",
+ "prefix": "DKB_",
+ "read_from": "49eee0d965 (2026-11-10, Add direct Mario Kart World build target)",
+ "pages": [
+  {
+   "title": "Display",
+   "rows": [
+    {
+     "label": "Console mode",
+     "type": "choice",
+     "names": [
+      "Docked",
+      "Handheld"
+     ],
+     "desc": "Plays the game as on a docked Switch 2 (TV) or in handheld mode. The game picks its own resolution and detail for each mode.",
+     "key": "OPERATION_MODE",
+     "ini": "operation_mode",
+     "section": "language",
+     "default": "docked",
+     "live": false,
+     "values": [
+      "docked",
+      "handheld"
+     ]
+    },
+    {
+     "label": "Fullscreen",
+     "type": "toggle",
+     "desc": "Fills the screen with the game; F11 toggles it.",
+     "inverted": false,
+     "key": "FULLSCREEN",
+     "ini": "fullscreen",
+     "section": "display",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Performance overlay",
+     "type": "choice",
+     "names": [
+      "Off",
+      "FPS",
+      "Full"
+     ],
+     "desc": "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and memory load, temperatures and the render thread's waits. F10 cycles the modes.",
+     "key": "PERF_OVERLAY",
+     "ini": "perf_overlay",
+     "section": "display",
+     "default": "off",
+     "live": true,
+     "values": [
+      "off",
+      "fps",
+      "full"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Sound",
+   "rows": [
+    {
+     "label": "Volume",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Master volume of the game.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "VOLUME",
+     "ini": "volume",
+     "section": "audio",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Audio channel format",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Stereo (2.0)",
+      "Surround (5.1)"
+     ],
+     "desc": "Speaker surround sound topology: Stereo, 5.1 Surround, or Auto-detect.",
+     "key": "AUDIO_CHANNELS",
+     "ini": "audio_channels",
+     "section": "audio",
+     "default": "stereo",
+     "live": false,
+     "values": [
+      "auto",
+      "stereo",
+      "5.1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Controls",
+   "rows": [
+    {
+     "label": "Button layout",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Nintendo (A right)",
+      "Xbox (A bottom)",
+      "Xbox prompts (A right)"
+     ],
+     "desc": "Which button is A. Nintendo: the right one, as on a Switch. Xbox: the bottom one, as labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks Nintendo for controllers with Nintendo labels and Xbox for the others. Xbox prompts: A is the right one as with Nintendo, and the game shows the Xbox labels (B for A, A for B, Y for X, X for Y); the prompts change after a restart. The letters are part of the game's files, so a button you remap in Controls keeps the old letter on screen.",
+     "key": "PAD_LAYOUT",
+     "ini": "pad_layout",
+     "section": "input",
+     "default": "auto",
+     "live": true,
+     "values": [
+      "auto",
+      "nintendo",
+      "xbox",
+      "xbox_prompts"
+     ]
+    },
+    {
+     "label": "Motion controls",
+     "type": "toggle",
+     "desc": "Aiming with the controller's gyroscope.",
+     "inverted": false,
+     "key": "MOTION",
+     "ini": "motion",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Stick dead zone",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 50.0,
+     "desc": "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own.",
+     "step": 1.0,
+     "fmt": "%.0f %%",
+     "key": "STICK_DEADZONE",
+     "ini": "stick_deadzone",
+     "section": "input",
+     "default": "8",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "System",
+   "rows": [
+    {
+     "label": "Menu language",
+     "type": "choice",
+     "names": [
+      "Automatic (from Windows)",
+      "English",
+      "Русский"
+     ],
+     "desc": "Language of this menu and the overlay.",
+     "key": "MENU_LANG",
+     "ini": "menu_lang",
+     "section": "language",
+     "default": "",
+     "live": true,
+     "values": [
+      "",
+      "en",
+      "ru"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Advanced",
+   "rows": [
+    {
+     "label": "GPU memory mode",
+     "type": "choice",
+     "values": [
+      "import",
+      "mirror"
+     ],
+     "names": [
+      "Import (recommended)",
+      "Mirror"
+     ],
+     "desc": "How game memory reaches the GPU. Import: the GPU reads the game memory itself (stable). Mirror: a copy in video memory (faster, but caused crashes and flickering objects in tests).",
+     "key": "MEMORY",
+     "ini": "memory",
+     "section": "performance",
+     "default": "import",
+     "live": false
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1380 @@
+{
+ "port": "mkw-thwomp",
+ "ini": "mkw.ini",
+ "prefix": "MKW_",
+ "read_from": "57a5766 (2026-11-19, docs(release): MKW-THWOMP 0.2.2c changelog and README badge)",
+ "pages": [
+  {
+   "title": "Screen",
+   "rows": [
+    {
+     "label": "Fullscreen",
+     "type": "toggle",
+     "desc": "Fills the screen with the game; F11 toggles it.",
+     "inverted": false,
+     "key": "FULLSCREEN",
+     "ini": "fullscreen",
+     "section": "display",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Presentation",
+     "type": "choice",
+     "names": [
+      "Mailbox",
+      "VSync",
+      "Immediate"
+     ],
+     "desc": "How finished frames reach the screen.",
+     "key": "VK_PRESENT",
+     "ini": "vk_present",
+     "section": "display",
+     "default": "mailbox",
+     "live": true,
+     "values": [
+      "mailbox",
+      "fifo",
+      "immediate"
+     ]
+    },
+    {
+     "label": "Performance overlay",
+     "type": "choice",
+     "names": [
+      "Off",
+      "FPS",
+      "Full"
+     ],
+     "desc": "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and memory load, temperatures and the render thread's waits. F10 cycles the modes.",
+     "key": "PERF_OVERLAY",
+     "ini": "perf_overlay",
+     "section": "display",
+     "default": "off",
+     "live": true,
+     "values": [
+      "off",
+      "fps",
+      "full"
+     ]
+    },
+    {
+     "label": "Frame rate",
+     "type": "choice",
+     "values": [
+      "auto",
+      "30",
+      "60"
+     ],
+     "names": [
+      "Automatic",
+      "30",
+      "60"
+     ],
+     "desc": "Frames per second the game aims for. Automatic is the console's: 60, or 30 when a frame takes too long. If your computer cannot hold 60, choose 30 so the race runs at its real speed.",
+     "key": "FPS",
+     "ini": "fps",
+     "section": "display",
+     "default": "auto",
+     "live": true
+    },
+    {
+     "type": "group",
+     "label": "Picture"
+    },
+    {
+     "label": "Picture shape",
+     "type": "choice",
+     "names": [
+      "Keep (bars)",
+      "Stretch"
+     ],
+     "desc": "When the window's shape differs from the game resolution's (a 16:9 game on the Steam Deck's 16:10 screen), keep the picture's proportions with black bars, or stretch it over the whole window.",
+     "key": "PICTURE_FIT",
+     "ini": "picture_fit",
+     "section": "display",
+     "default": "keep",
+     "live": true,
+     "values": [
+      "keep",
+      "stretch"
+     ]
+    },
+    {
+     "label": "HDR",
+     "type": "choice",
+     "values": [
+      "auto",
+      "off"
+     ],
+     "names": [
+      "Automatic",
+      "Off"
+     ],
+     "desc": "Automatic shows the game's own HDR picture when the display is in HDR (on Windows, Settings > Display > Use HDR), as the console does; its brightness follows the system's HDR settings. Off always shows the standard picture. Applies at once.",
+     "key": "HDR",
+     "ini": "hdr",
+     "section": "display",
+     "default": "auto",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "Graphics",
+   "rows": [
+    {
+     "label": "Internal resolution",
+     "type": "choice",
+     "values": [
+      "original",
+      "540",
+      "720",
+      "900",
+      "1080",
+      "1440",
+      "2160"
+     ],
+     "names": [
+      "Original",
+      "540p",
+      "720p",
+      "900p",
+      "1080p",
+      "1440p",
+      "2160p"
+     ],
+     "desc": "Lines the game renders its scenes at, then scaled to the window. Lower is faster: 720p suits integrated graphics. Original is the console's (up to 1440p).",
+     "key": "RESOLUTION",
+     "ini": "resolution",
+     "section": "display",
+     "default": "original",
+     "live": false
+    },
+    {
+     "label": "Aspect ratio",
+     "type": "choice",
+     "values": [
+      "16:9",
+      "window",
+      "21:9",
+      "32:9",
+      "48:9"
+     ],
+     "names": [
+      "16:9",
+      "Window",
+      "21:9",
+      "32:9",
+      "48:9"
+     ],
+     "desc": "Wider than 16:9 shows more of the course at the sides, for ultrawide screens. 16:9 is the console's; Window takes the window's or monitor's shape. Menus stay stretched for now.",
+     "key": "ASPECT",
+     "ini": "aspect",
+     "section": "display",
+     "default": "16:9",
+     "live": false
+    },
+    {
+     "label": "Texture filtering",
+     "type": "choice",
+     "values": [
+      "game",
+      "2",
+      "4",
+      "8",
+      "16"
+     ],
+     "names": [
+      "Game",
+      "2x",
+      "4x",
+      "8x",
+      "16x"
+     ],
+     "desc": "Sharpness of textures seen far away or at a low angle, such as the road ahead. Game uses what each texture asks for. Impact on frame rate: low.",
+     "key": "ANISO",
+     "ini": "aniso",
+     "section": "graphics",
+     "default": "game",
+     "live": false
+    },
+    {
+     "label": "Texture quality",
+     "type": "choice",
+     "names": [
+      "Full",
+      "Half",
+      "Quarter"
+     ],
+     "desc": "Detail of the game's own textures. Half and Quarter skip their finest levels: less memory traffic on the graphics card, blurrier surfaces up close. Impact on frame rate: low.",
+     "key": "TEX_QUALITY",
+     "ini": "tex_quality",
+     "section": "graphics",
+     "default": "full",
+     "live": false,
+     "values": [
+      "full",
+      "half",
+      "quarter"
+     ]
+    },
+    {
+     "label": "Detail distance",
+     "type": "choice",
+     "values": [
+      "1",
+      "1.5",
+      "2",
+      "3",
+      "4"
+     ],
+     "names": [
+      "Low",
+      "Medium",
+      "Console",
+      "High",
+      "Very high"
+     ],
+     "desc": "How far objects keep their detailed models before switching to simpler ones. Console is the Switch 2's. Impact on frame rate: low.",
+     "key": "DETAIL_DISTANCE",
+     "ini": "detail_distance",
+     "section": "graphics",
+     "default": "2",
+     "live": false
+    },
+    {
+     "label": "Shadow quality",
+     "type": "choice",
+     "values": [
+      "console",
+      "1024",
+      "2048",
+      "3072",
+      "4096"
+     ],
+     "names": [
+      "Console",
+      "1024",
+      "2048",
+      "3072",
+      "4096"
+     ],
+     "desc": "Size of the map the game draws shadows from. Smaller is lighter for the graphics card, with blurrier shadow edges. Console is 3072 docked and 2048 handheld. Impact on frame rate: low.",
+     "key": "SHADOW_SIZE",
+     "ini": "shadow_size",
+     "section": "graphics",
+     "default": "console",
+     "live": false
+    },
+    {
+     "label": "Console mode",
+     "type": "choice",
+     "names": [
+      "Docked",
+      "Handheld"
+     ],
+     "desc": "Whether the game thinks it runs docked or handheld. Docked, it draws the scene smaller and enlarges it with its own scaler; handheld, at the full internal resolution with smaller shadows: sharper, but more work for the graphics card.",
+     "key": "OPERATION_MODE",
+     "ini": "operation_mode",
+     "section": "language",
+     "default": "docked",
+     "live": false,
+     "values": [
+      "docked",
+      "handheld"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Advanced graphics",
+   "rows": [
+    {
+     "type": "group",
+     "label": "Upscaling"
+    },
+    {
+     "label": "Scaling to the window",
+     "type": "choice",
+     "names": [
+      "AMD FSR 1",
+      "Bilinear",
+      "NVIDIA DLSS"
+     ],
+     "desc": "How the picture is scaled when the window is larger than the game resolution. FSR keeps edges and detail sharper than bilinear. NVIDIA DLSS (RTX graphics cards) rebuilds the picture from several frames with the game's depth and motion: the sharpest, and it smooths edges too. Switching to or from DLSS takes a restart.",
+     "key": "UPSCALER",
+     "ini": "upscaler",
+     "section": "display",
+     "default": "fsr",
+     "live": true,
+     "values": [
+      "fsr",
+      "bilinear",
+      "dlss"
+     ]
+    },
+    {
+     "label": "FSR sharpness",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Sharpening after FSR scaling; 0 turns it off.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "SHARPNESS",
+     "ini": "sharpness",
+     "section": "display",
+     "default": "80",
+     "live": true
+    },
+    {
+     "label": "DLSS model",
+     "type": "choice",
+     "names": [
+      "Transformer",
+      "Transformer 2nd gen",
+      "CNN"
+     ],
+     "desc": "NVIDIA's AI model for DLSS. Transformer: sharp and stable. Transformer 2nd gen: sharper still, with less ghosting, at a little more cost. CNN: the older network, lighter on the graphics card (for older or less capable GPUs).",
+     "key": "DLSS_MODEL",
+     "ini": "dlss_model",
+     "section": "display",
+     "default": "transformer",
+     "live": true,
+     "values": [
+      "transformer",
+      "transformer2",
+      "cnn"
+     ]
+    },
+    {
+     "label": "DLSS quality",
+     "type": "choice",
+     "names": [
+      "DLAA",
+      "Quality",
+      "Balanced",
+      "Performance",
+      "Ultra Performance"
+     ],
+     "desc": "How much of your display the game renders before DLSS fills in the rest: DLAA all of it, Quality two thirds, Balanced a little over half, Performance half, Ultra Performance a third. The game resolution follows it; the size the game renders at is shown under the choice.",
+     "key": "DLSS_QUALITY",
+     "ini": "dlss_quality",
+     "section": "display",
+     "default": "quality",
+     "live": false,
+     "values": [
+      "dlaa",
+      "quality",
+      "balanced",
+      "performance",
+      "ultra"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Latency"
+    },
+    {
+     "label": "NVIDIA Reflex",
+     "type": "choice",
+     "names": [
+      "Off",
+      "On",
+      "On + Boost"
+     ],
+     "desc": "Starts each frame as late as it can still be shown on time, so a button press reaches the screen sooner. Most useful with frame generation. On + Boost also keeps the graphics card's clocks up, for a little more power use. Not on the console.",
+     "key": "REFLEX",
+     "ini": "reflex",
+     "section": "display",
+     "default": "off",
+     "live": true,
+     "values": [
+      "off",
+      "on",
+      "boost"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Colour"
+    },
+    {
+     "label": "Colour profile",
+     "type": "choice",
+     "names": [
+      "Game's own",
+      "Vivid (OLED)",
+      "Clarity",
+      "Custom"
+     ],
+     "desc": "Sets the four values below. Vivid: more contrast and saturation, shadows opened a little (made for OLED screens). Clarity: a little more contrast, saturation and brightness. Moving a value makes the profile Custom. The HUD changes with the picture; this menu does not. Not used on an HDR display.",
+     "key": "COLOR_PRESET",
+     "ini": "color_preset",
+     "section": "display",
+     "default": "default",
+     "live": true,
+     "values": [
+      "default",
+      "vivid",
+      "clarity",
+      "custom"
+     ]
+    },
+    {
+     "label": "Brightness",
+     "type": "slider",
+     "lo": -30.0,
+     "hi": 30.0,
+     "desc": "Added to every colour; 0 leaves it.",
+     "step": 1.0,
+     "fmt": "%+.0f %%",
+     "key": "COLOR_BRIGHTNESS",
+     "ini": "color_brightness",
+     "section": "display",
+     "default": "0",
+     "live": true
+    },
+    {
+     "label": "Contrast",
+     "type": "slider",
+     "lo": 70.0,
+     "hi": 150.0,
+     "desc": "Spreads colours away from mid-grey (above 100 %) or towards it; 100 % leaves them.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "COLOR_CONTRAST",
+     "ini": "color_contrast",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Saturation",
+     "type": "slider",
+     "lo": 50.0,
+     "hi": 200.0,
+     "desc": "Colour strength against grey; 100 % leaves it.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "COLOR_SATURATION",
+     "ini": "color_saturation",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Gamma",
+     "type": "slider",
+     "lo": 0.8,
+     "hi": 1.2,
+     "desc": "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+     "step": 0.02,
+     "fmt": "%.2f",
+     "key": "COLOR_GAMMA",
+     "ini": "color_gamma",
+     "section": "display",
+     "default": "1",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "Game",
+   "rows": [
+    {
+     "label": "LAN play",
+     "type": "toggle",
+     "desc": "The title menu's Wireless Play becomes LAN Play, to race other PCs on the same local network (UDP ports 49152 and 35000). It only reaches local network addresses, never the internet. Applies at the next start.",
+     "inverted": false,
+     "key": "LAN",
+     "ini": "lan",
+     "section": "language",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Sound",
+   "rows": [
+    {
+     "label": "Volume",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Master volume of the game.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "VOLUME",
+     "ini": "volume",
+     "section": "audio",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Speakers",
+     "type": "choice",
+     "values": [
+      "auto",
+      "2",
+      "6"
+     ],
+     "names": [
+      "Automatic",
+      "Stereo",
+      "5.1 surround"
+     ],
+     "desc": "Automatic gives the game's 5.1 surround mix when the system's sound output has 6 channels or more, and stereo otherwise. Applies at the next start.",
+     "key": "AUDIO_CHANNELS",
+     "ini": "audio_channels",
+     "section": "audio",
+     "default": "auto",
+     "live": false
+    },
+    {
+     "label": "Mute in background",
+     "type": "toggle",
+     "desc": "No sound while the game window is not in front.",
+     "inverted": false,
+     "key": "BACKGROUND_MUTE",
+     "ini": "background_mute",
+     "section": "audio",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Controls",
+   "rows": [
+    {
+     "label": "Button layout",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Nintendo (A right)",
+      "Xbox (A bottom)"
+     ],
+     "desc": "Which button is A. Nintendo: the right one, as on a Switch. Xbox: the bottom one, as labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks Nintendo for controllers with Nintendo labels and Xbox for the others.",
+     "key": "PAD_LAYOUT",
+     "ini": "pad_layout",
+     "section": "input",
+     "default": "auto",
+     "live": true,
+     "values": [
+      "auto",
+      "nintendo",
+      "xbox"
+     ]
+    },
+    {
+     "label": "Button icons",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Nintendo",
+      "Xbox",
+      "PlayStation",
+      "Keyboard"
+     ],
+     "desc": "Which buttons the game's prompts show. Automatic follows the device you used last: the controller's own buttons (Xbox or PlayStation), or your keys and mouse. The icons follow your remapped buttons.",
+     "key": "BUTTON_ICONS",
+     "ini": "button_icons",
+     "section": "input",
+     "default": "auto",
+     "live": true,
+     "values": [
+      "auto",
+      "nintendo",
+      "xbox",
+      "playstation",
+      "keyboard"
+     ]
+    },
+    {
+     "label": "Motion controls",
+     "type": "toggle",
+     "desc": "Steering by tilting the controller.",
+     "inverted": false,
+     "key": "MOTION",
+     "ini": "motion",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Keyboard",
+     "type": "toggle",
+     "desc": "Use the keyboard for game controls. Controllers are not affected.",
+     "inverted": false,
+     "key": "KEYBOARD",
+     "ini": "keyboard",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Vibration strength",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 300.0,
+     "desc": "How strong the controller vibrates.",
+     "step": 10.0,
+     "fmt": "%.0f %%",
+     "key": "RUMBLE_STRENGTH",
+     "ini": "rumble_strength",
+     "section": "input",
+     "default": "130",
+     "live": true
+    },
+    {
+     "label": "Vibration curve",
+     "type": "slider",
+     "lo": 0.2,
+     "hi": 1.5,
+     "desc": "Lower values make weak vibration stronger.",
+     "step": 0.05,
+     "fmt": "%.2f",
+     "key": "RUMBLE_CURVE",
+     "ini": "rumble_curve",
+     "section": "input",
+     "default": "0.6",
+     "live": true
+    },
+    {
+     "label": "Trigger vibration (Xbox)",
+     "type": "toggle",
+     "desc": "Vibrates the triggers of an Xbox controller too.",
+     "inverted": false,
+     "key": "RUMBLE_TRIGGERS",
+     "ini": "rumble_triggers",
+     "section": "input",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Switch 2 controllers (Bluetooth)",
+     "type": "toggle",
+     "desc": "Joy-Con 2 and Pro Controller 2 over Bluetooth. To pair one, hold its Sync button with the game open. Applies at the next start.",
+     "inverted": false,
+     "key": "SWITCH2",
+     "ini": "switch2",
+     "section": "input",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Stick dead zone",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 40.0,
+     "desc": "How far a stick must tilt before it counts. Raise it if the kart drifts with the stick at rest.",
+     "step": 1.0,
+     "fmt": "%.0f %%",
+     "key": "STICK_DEADZONE",
+     "ini": "stick_deadzone",
+     "section": "input",
+     "default": "8",
+     "live": true
+    },
+    {
+     "label": "Mouse camera sensitivity",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 10.0,
+     "desc": "How fast the mouse turns the camera.",
+     "step": 0.1,
+     "fmt": "%.1f",
+     "key": "MOUSE_SENS",
+     "ini": "mouse_sens",
+     "section": "input",
+     "default": "1",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "Menu",
+   "rows": [
+    {
+     "label": "Menu language",
+     "type": "choice",
+     "names": [
+      "Automatic (from the system)",
+      "English",
+      "日本語",
+      "Français",
+      "Deutsch",
+      "Italiano",
+      "Español",
+      "Nederlands",
+      "Português",
+      "Português (Brasil)",
+      "Русский",
+      "简体中文",
+      "繁體中文",
+      "한국어",
+      "Español (Latinoamérica)",
+      "Català",
+      "Galego",
+      "Euskara",
+      "Polski",
+      "TR",
+      "UK",
+      "TH"
+     ],
+     "desc": "Language of this menu and the overlay.",
+     "key": "MENU_LANG",
+     "ini": "menu_lang",
+     "section": "language",
+     "default": "",
+     "live": true,
+     "values": [
+      "",
+      "en",
+      "ja",
+      "fr",
+      "de",
+      "it",
+      "es",
+      "nl",
+      "pt",
+      "pt-BR",
+      "ru",
+      "zh-Hans",
+      "zh-Hant",
+      "ko",
+      "es-419",
+      "ca",
+      "gl",
+      "eu",
+      "pl",
+      "tr",
+      "uk",
+      "th"
+     ]
+    },
+    {
+     "label": "Menu theme",
+     "type": "choice",
+     "names": [
+      "Dark",
+      "Light",
+      "SteelTemple"
+     ],
+     "desc": "The look of this menu: Dark, with red accents; Light, like the Switch 2 system settings; or SteelTemple, dark with chequered racing bands along the top and the bottom.",
+     "key": "MENU_THEME",
+     "ini": "menu_theme",
+     "section": "language",
+     "default": "steeltemple",
+     "live": true,
+     "values": [
+      "dark",
+      "light",
+      "steeltemple"
+     ]
+    },
+    {
+     "label": "Check for updates",
+     "type": "toggle",
+     "desc": "At start, ask GitHub for a newer release of the port and offer it on the start screen (a few seconds at most, nothing offline).",
+     "inverted": false,
+     "key": "UPDATE_CHECK",
+     "ini": "update_check",
+     "section": "launcher",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Show launcher on startup",
+     "type": "toggle",
+     "desc": "Open the start screen when the port is launched. Turn Off to go straight into the game; use --launcher or this setting to bring the start screen back.",
+     "inverted": false,
+     "key": "SHOW_LAUNCHER",
+     "ini": "show_launcher",
+     "section": "launcher",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Advanced",
+   "rows": [
+    {
+     "type": "group",
+     "label": "Scheduling"
+    },
+    {
+     "label": "Virtual core preemption",
+     "type": "choice",
+     "names": [
+      "Off",
+      "On",
+      "Inheritance only"
+     ],
+     "desc": "Lets a game thread interrupt another one on the same virtual core.",
+     "key": "ASYNC_PREEMPT",
+     "ini": "async_preempt",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1",
+      "2"
+     ]
+    },
+    {
+     "label": "GPU frame prep on its own thread",
+     "type": "toggle",
+     "desc": "Prepares frames for the GPU on a separate thread instead of the game thread. Adds up to one frame of latency.",
+     "inverted": false,
+     "key": "REPLAY_ASYNC",
+     "ini": "replay_async",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Virtual core gate",
+     "type": "toggle",
+     "desc": "Lets only one thread run per virtual core, as on the console.",
+     "inverted": false,
+     "key": "FREE_CORES",
+     "ini": "free_cores",
+     "section": "performance",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "1 ms Windows timer",
+     "type": "toggle",
+     "desc": "Raises the system timer resolution to 1 ms for steadier frame pacing.",
+     "inverted": false,
+     "key": "TIMER_1MS",
+     "ini": "timer_1ms",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Shaders and pipelines"
+    },
+    {
+     "label": "Waiting draw handling",
+     "type": "choice",
+     "names": [
+      "Default",
+      "Old (draw)"
+     ],
+     "desc": "Default keeps the current scheduling with a reserved worker for waiting draws; Old (draw) uses the previous scheduling.",
+     "key": "PIPE_WAIT",
+     "ini": "pipe_wait",
+     "section": "performance",
+     "default": "default",
+     "live": false,
+     "values": [
+      "default",
+      "draw"
+     ]
+    },
+    {
+     "label": "Draws skipped while a pipeline builds",
+     "type": "choice",
+     "names": [
+      "Strict",
+      "Any",
+      "Fullscreen passes"
+     ],
+     "desc": "Which draws are dropped instead of waiting for their pipeline.",
+     "key": "PIPE_SKIP",
+     "ini": "pipe_skip",
+     "section": "performance",
+     "default": "fullscreen",
+     "live": false,
+     "values": [
+      "strict",
+      "any",
+      "fullscreen"
+     ]
+    },
+    {
+     "label": "Pipeline prebuild",
+     "type": "toggle",
+     "desc": "Builds known pipelines ahead of time.",
+     "inverted": false,
+     "key": "PIPE_PREBUILD",
+     "ini": "pipe_prebuild",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Graphics pipeline library",
+     "type": "toggle",
+     "desc": "Uses the Vulkan pipeline library extension; turn off if your driver misbehaves with it.",
+     "inverted": false,
+     "key": "GPL",
+     "ini": "gpl",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Textures and memory"
+    },
+    {
+     "label": "ASTC texture decoding",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "GPU shader",
+      "Native",
+      "CPU"
+     ],
+     "desc": "Where compressed ASTC textures are decoded.",
+     "key": "ASTC",
+     "ini": "astc",
+     "section": "performance",
+     "default": "auto",
+     "live": false,
+     "values": [
+      "auto",
+      "gpu",
+      "native",
+      "cpu"
+     ]
+    },
+    {
+     "label": "GPU memory mode",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Import",
+      "Mirror",
+      "Verify"
+     ],
+     "desc": "How game memory is shared with the GPU.",
+     "key": "MEMORY",
+     "ini": "memory",
+     "section": "performance",
+     "default": "auto",
+     "live": false,
+     "values": [
+      "auto",
+      "import",
+      "mirror",
+      "verify"
+     ]
+    },
+    {
+     "label": "Texture aliasing",
+     "type": "toggle",
+     "desc": "A new texture created over a live texture's memory starts with that content instead of empty.",
+     "inverted": false,
+     "key": "TEX_ALIAS",
+     "ini": "tex_alias",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Render fixes"
+    },
+    {
+     "label": "Constant buffer fix",
+     "type": "toggle",
+     "desc": "Fills the driver-reserved constant bank c0 (storage sizes, dispatch size, point size, base instance) instead of reading zeros.",
+     "inverted": false,
+     "key": "FIX_C0",
+     "ini": "fix_c0",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Zero new GPU memory",
+     "type": "toggle",
+     "desc": "New GPU memory pools start zero-filled, as Switch memory does.",
+     "inverted": false,
+     "key": "FIX_ZERO",
+     "ini": "fix_zero",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Skip repeated binds",
+     "type": "toggle",
+     "desc": "Optimisation: skips bindings that did not change.",
+     "inverted": false,
+     "key": "BIND_SKIP",
+     "ini": "bind_skip",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Shader memo",
+     "type": "toggle",
+     "desc": "Optimisation: remembers shader lookups.",
+     "inverted": false,
+     "key": "SHADER_MEMO",
+     "ini": "shader_memo",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Pipeline memo",
+     "type": "toggle",
+     "desc": "Optimisation: reuses the previous draw's pipeline when its state repeats.",
+     "inverted": false,
+     "key": "PIPE_MEMO",
+     "ini": "pipe_memo",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Texture binding memo",
+     "type": "toggle",
+     "desc": "Optimisation: remembers texture descriptors between draws.",
+     "inverted": false,
+     "key": "TEX_MEMO",
+     "ini": "tex_memo",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Descriptor templates",
+     "type": "toggle",
+     "desc": "Optimisation: updates descriptors in bulk.",
+     "inverted": false,
+     "key": "DESC_TEMPLATE",
+     "ini": "desc_template",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Skip repeated push constants",
+     "type": "toggle",
+     "desc": "Optimisation: skips push constants that did not change.",
+     "inverted": false,
+     "key": "PUSH_SKIP",
+     "ini": "push_skip",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Early GPU submission",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 1000.0,
+     "desc": "Submits GPU work in parts every N draws between passes so the GPU starts earlier; 0 turns it off.",
+     "step": 8.0,
+     "fmt": "%.0f",
+     "key": "SPLIT_DRAWS",
+     "ini": "split_draws",
+     "section": "performance",
+     "default": "64",
+     "live": false
+    },
+    {
+     "type": "group",
+     "label": "Vulkan"
+    },
+    {
+     "label": "Validation layer",
+     "type": "toggle",
+     "desc": "Checks every Vulkan call and slows the game down a lot.",
+     "inverted": false,
+     "key": "VK_VALIDATION",
+     "ini": "vk_validation",
+     "section": "performance",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Dynamic vertex state",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Off",
+      "On"
+     ],
+     "desc": "Forces dynamic vertex input on or off; the default depends on the GPU.",
+     "key": "VK_DYN_VERTEX",
+     "ini": "vk_dyn_vertex",
+     "section": "performance",
+     "default": "",
+     "live": false,
+     "values": [
+      "",
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Pin subgroup size",
+     "type": "toggle",
+     "desc": "Fixes the shader subgroup size.",
+     "inverted": false,
+     "key": "VK_SUBGROUP_PIN",
+     "ini": "vk_subgroup_pin",
+     "section": "performance",
+     "default": "1",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Diagnostics"
+    },
+    {
+     "label": "Flight recorder",
+     "type": "toggle",
+     "desc": "Keeps a short history and saves it when a frame freezes.",
+     "inverted": false,
+     "key": "FLIGHT",
+     "ini": "flight",
+     "section": "diagnostics",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Freeze threshold (ms)",
+     "type": "slider",
+     "lo": 20.0,
+     "hi": 1000.0,
+     "desc": "Frame time that counts as a freeze.",
+     "step": 10.0,
+     "fmt": "%.0f",
+     "key": "FLIGHT_SPIKE_MS",
+     "ini": "flight_spike_ms",
+     "section": "diagnostics",
+     "default": "100",
+     "live": false
+    }
+   ]
+  },
+  {
+   "title": "Hacks",
+   "rows": [
+    {
+     "label": "Turbo",
+     "type": "choice",
+     "names": [
+      "Off",
+      "Hold F2",
+      "F2 on/off",
+      "On"
+     ],
+     "desc": "The whole game runs faster: menus, movies, loads and races. Hold or press F2. The screen shows at most 60 frames a second.",
+     "key": "TURBO",
+     "ini": "turbo",
+     "section": "hacks",
+     "default": "off",
+     "live": true,
+     "values": [
+      "off",
+      "hold",
+      "toggle",
+      "on"
+     ]
+    },
+    {
+     "label": "Turbo speed",
+     "type": "slider",
+     "lo": 2.0,
+     "hi": 8.0,
+     "desc": "How many times faster. A slow PC may not reach it.",
+     "step": 1.0,
+     "fmt": "x%.0f",
+     "key": "TURBO_SPEED",
+     "ini": "turbo_speed",
+     "section": "hacks",
+     "default": "4",
+     "live": true
+    },
+    {
+     "label": "Skip movies",
+     "type": "toggle",
+     "desc": "Skips the cup and course openings as soon as they start.",
+     "inverted": false,
+     "key": "SKIP_MOVIES",
+     "ini": "skip_movies",
+     "section": "hacks",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Unlock everything",
+     "type": "toggle",
+     "desc": "Every driver and outfit, vehicle and sticker, the Special Cup and Mirror. It goes into your save when the game saves: turning it off does not lock them again.",
+     "inverted": false,
+     "key": "UNLOCK_ALL",
+     "ini": "unlock_all",
+     "section": "hacks",
+     "default": "0",
+     "live": false,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Straight to",
+     "type": "choice",
+     "names": [
+      "Off",
+      "Time trial",
+      "Free roam"
+     ],
+     "desc": "Goes through the menus by itself at start. Time trial: Mario, standard kart and the course the game offers (always the same with «Same randomness every time»), no rivals. Free roam: the open world. The controller still works.",
+     "key": "QUICK_RACE",
+     "ini": "quick_race",
+     "section": "hacks",
+     "default": "off",
+     "live": false,
+     "values": [
+      "off",
+      "tt",
+      "free"
+     ]
+    },
+    {
+     "label": "Freeze keys",
+     "type": "toggle",
+     "desc": "F3 stops the game on the frame on screen and starts it again; F4 moves it on by one frame. To look at a moment closely.",
+     "inverted": false,
+     "key": "FREEZE_KEYS",
+     "ini": "freeze_keys",
+     "section": "hacks",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    }
+   ]
+  }
+ ]
+}
