@@ -97,6 +97,21 @@ Wizard, then one with its launcher, then the newest version) is the one Play sta
 pick another, which is then remembered ("Use this copy"). Copies inside build, staging or backup folders are shown
 too, ranked last; **System Settings > Ports on this PC** can leave them out.
 
+## Sanctum's own updates
+
+Sanctum checks its own releases (`STS78721/SteelTempleSanctum`) at start, at most every 15 minutes, with the saved
+ETag. With **System Settings > About > Update Sanctum automatically** on (the default), a newer release's
+`SteelTemple-Sanctum-<version>-Portable.zip` downloads in the background, is checked against the SHA-256 GitHub
+publishes, and is unpacked to `%LOCALAPPDATA%\SteelTemple\Sanctum\sanctum-update`. Home says when it is ready. It
+is put in place when Sanctum closes, or straight away with **Updates > restart and update**. Windows lets a running
+program be renamed, so every replaced file is first renamed `*.old` and put back if anything fails. The old program's
+`.old` is removed at the next start. Only Sanctum's own files are replaced. With automatic updates off, About shows
+the new version and A downloads it. Drafts and pre-releases are never offered.
+
+Releasing: set `SANCTUM_VERSION` in `src/selfupdate.h` and the version in `assets/sanctum.rc` and `.manifest`, build,
+then `python tools/package.py` and attach the zip to a release tagged with that version. `SANCTUM_SELF_VERSION=1.0.0`
+makes a build think it is older, to test the update; `SANCTUM_NO_UPDATE=1` turns the check off.
+
 ## Where things are
 
 | | |
@@ -142,10 +157,12 @@ no game started; the README screenshots are taken this way). `tools/build.py --n
 | `src/json.cpp` | a small JSON reader |
 | `src/profile.cpp` | Profile: the icon picker (by set) and the background colour |
 | `src/avatars.cpp` | the profile icons: the atlas, the 16 colours, drawing an icon on its colour |
+| `src/selfupdate.cpp` | Sanctum's own updates: check its releases, download and verify, put in place on close or restart |
 | `src/catalog.cpp` | the ports, the search of this PC, library.ini |
 | `src/covers.cpp` | cover art from the player's folder, decoded on a worker thread |
 | `src/launch.cpp` | starting a port and coming back when it ends |
 | `src/port_settings.cpp` | a port's own settings page, and the ini editor that keeps the file as it is |
+| `tools/package.py` | the release zip, `dist/SteelTemple-Sanctum-<version>-Portable.zip` (version from `src/selfupdate.h`) |
 | `tools/extract_settings.py` | each port's settings list from its source tree, into `assets/settings/` |
 | `src/theme.h` | Dark and Light (the ports' universal themes) |
 | `third_party/` | Dear ImGui 1.91.9 (MIT), stb_image (public domain / MIT) |

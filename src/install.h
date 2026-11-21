@@ -10,6 +10,7 @@
 //
 // Sanctum never downloads game files: only the ports' own releases.
 #pragma once
+#include <atomic>
 #include <SDL3/SDL.h>
 
 #include <string>
@@ -39,5 +40,11 @@ bool install_busy();                   // a job is waiting or running
 bool install_queued(int port);         // this port has a job waiting or running
 void install_poll(SDL_Window *w);      // UI thread: finished jobs into the catalog; steps aside for a Setup Wizard
 std::string library_dir();             // where new ports go (System Settings > Ports on this PC)
+
+// package helpers (also Sanctum's own updates): unzip with Windows' tar; lay src's files over dst (each replaced file
+// becomes <name>.old first, all put back on failure); remove a folder and everything in it
+std::string unzip(const std::string &zip, const std::string &to, const std::atomic<bool> &cancel);
+std::string overlay(const std::string &src, const std::string &dst);
+void remove_tree(const std::string &p);
 
 }  // namespace sanctum

@@ -51,6 +51,7 @@ void config_load() {
         else if (k == "cover_dir") g_cfg.cover_dir = v;
         else if (k == "library_dir") g_cfg.library_dir = v;
         else if (k == "profile" && !v.empty()) g_cfg.profile = v;
+        else if (k == "auto_update") g_cfg.auto_update = v == "1";
         else if (k == "avatar" && !v.empty()) g_cfg.avatar = v;
         else if (k == "avatar_bg") g_cfg.avatar_bg = SDL_clamp(atoi(v.c_str()), 0, 15);
     }
@@ -74,6 +75,7 @@ void config_save() {
     s += "cover_dir=" + g_cfg.cover_dir + "\n";
     s += "library_dir=" + g_cfg.library_dir + "\n";
     s += "profile=" + g_cfg.profile + "\n";
+    s += std::string("auto_update=") + (g_cfg.auto_update ? "1" : "0") + "\n";
     s += "avatar=" + g_cfg.avatar + "\n";
     s += "avatar_bg=" + std::to_string(g_cfg.avatar_bg) + "\n";
     std::string tmp = path() + ".tmp";

@@ -65,7 +65,7 @@ static std::vector<std::string> list(const std::string &dir) {
     return out;
 }
 
-static void remove_tree(const std::string &p) {
+void remove_tree(const std::string &p) {
     if (is_dir(p))
         for (auto &n : list(p)) remove_tree(p + "\\" + n);
     SetFileAttributesW(W(p).c_str(), FILE_ATTRIBUTE_NORMAL);
@@ -116,7 +116,7 @@ static void make_dirs(const std::string &p) {
 }
 
 // Windows' own tar (bsdtar) unpacks zips; returns "" or why
-static std::string unzip(const std::string &zip, const std::string &to, const std::atomic<bool> &cancel) {
+std::string unzip(const std::string &zip, const std::string &to, const std::atomic<bool> &cancel) {
     const char *sys = getenv("SystemRoot");
     std::string tar = std::string(sys ? sys : "C:\\Windows") + "\\System32\\tar.exe";
     const char *args[] = {tar.c_str(), "-xf", zip.c_str(), "-C", to.c_str(), nullptr};
@@ -138,7 +138,7 @@ static std::string unzip(const std::string &zip, const std::string &to, const st
 
 // Lays the files of src over dst. Each replaced file is first renamed <name>.old; on any failure everything done is
 // put back. On success the .old files are removed.
-static std::string overlay(const std::string &src, const std::string &dst) {
+std::string overlay(const std::string &src, const std::string &dst) {
     struct Step { std::string to; bool had_old; };
     std::vector<Step> done;
     std::string why;

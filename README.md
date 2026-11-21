@@ -129,6 +129,7 @@ New releases of these ports show up in Sanctum by themselves. Press **+** (Menu 
 1. Download the latest Sanctum from [**Releases**](https://github.com/STS78721/SteelTempleSanctum/releases) and
    unzip it anywhere.
 2. Start `SteelTemple-Sanctum.exe`. Ports you already have appear on Home within a few seconds.
+   From then on Sanctum updates itself: a new version downloads in the background and goes in when you close it.
 3. Open **Get ports** to download more. A port that builds its game from your files asks for them on its first
    start, through **Set up** on its page.
 

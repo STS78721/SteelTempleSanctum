@@ -21,6 +21,7 @@ struct Config {
     std::string cover_dir;        // the player's own folder of cover art; empty until they pick one
     std::string library_dir;      // where Get ports installs; empty: <home>\Games\SteelTemple
     std::string profile = "Player 1";
+    bool auto_update = true;      // Sanctum downloads its own updates and puts them in place when it closes
     std::string avatar = "Sword";  // the profile icon, by its name in assets/avatars.txt
     int avatar_bg = 0;             // its background colour (avatars.cpp, kColours)
 };

@@ -9,6 +9,7 @@
 #include "draw.h"
 #include "input.h"
 #include "install.h"
+#include "selfupdate.h"
 
 namespace sanctum {
 
@@ -24,7 +25,7 @@ struct Row {
     int id;          // what A does
     bool toggle = false, on = false;
 };
-enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_INFO };
+enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_UPDATE, R_AUTO_UPDATE, R_INFO };
 
 static std::vector<Row> rows_of(int cat) {
     std::vector<Row> r;
@@ -73,7 +74,21 @@ static std::vector<Row> rows_of(int cat) {
         break;
     }
     case CAT_ABOUT:
-        r.push_back({"SteelTemple Sanctum", "Version 0.3.0", R_INFO});
+        r.push_back({"SteelTemple Sanctum", std::string("Version ") + sanctum_version(), R_INFO});
+        {
+            std::string t = self_update_tag(), v;
+            switch (self_update_state()) {
+            case UPD_IDLE: v = "Check for updates"; break;
+            case UPD_CHECKING: v = "Checking GitHub..."; break;
+            case UPD_CURRENT: v = "Up to date  ·  check again"; break;
+            case UPD_AVAILABLE: v = t + " is out  ·  download it"; break;
+            case UPD_DOWNLOADING: v = "Downloading " + t + "  " + std::to_string((int)(self_update_progress() * 100)) + "%"; break;
+            case UPD_READY: v = t + " is ready  ·  restart and update"; break;
+            case UPD_FAILED: v = fit(16, self_update_error(), 520) + "  ·  try again"; break;
+            }
+            r.push_back({"Updates", demo_mode() ? "Up to date" : v, R_UPDATE});
+        }
+        r.push_back({"Update Sanctum automatically", "", R_AUTO_UPDATE, true, c.auto_update});
         r.push_back({"Settings folder", demo_mode() ? "%APPDATA%\\SteelTemple\\Sanctum" : config_dir(), R_INFO});
         r.push_back({"Game files", "Never downloaded or shipped: every port uses your own copy", R_INFO});
         break;
@@ -100,6 +115,14 @@ static void act(const Row &r) {
         return;
     }
     case R_PADS: go(SCR_CONTROLLERS); return;
+    case R_UPDATE:
+        switch (self_update_state()) {
+        case UPD_READY: self_update_apply(true); return;
+        case UPD_AVAILABLE: self_update_download(); return;
+        case UPD_CHECKING: case UPD_DOWNLOADING: return;
+        default: self_update_start(true); return;
+        }
+    case R_AUTO_UPDATE: c.auto_update = !c.auto_update; break;
     case R_LAYOUT:   // takes effect on the next press: the press that changed it was read the old way
         c.pad_layout = (c.pad_layout + 1) % 3;
         toast(c.pad_layout == 1 ? "Switch style: A on the right confirms" : c.pad_layout == 2 ? "Xbox style: A at the bottom confirms"

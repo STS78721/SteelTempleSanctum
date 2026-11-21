@@ -24,6 +24,7 @@
 
 #include "app.h"
 #include "avatars.h"
+#include "selfupdate.h"
 #include "catalog.h"
 #include "config.h"
 #include "covers.h"
@@ -182,6 +183,7 @@ int main(int, char **) {
     github_refresh();
     covers_init(ren);
     avatars_init(ren);
+    self_update_start();   // Sanctum's own releases: a newer one downloads in the background
 
     // the test script
     std::vector<Nav> script;
@@ -236,6 +238,8 @@ int main(int, char **) {
         if (a.nav == NAV_HOME) { a.back.clear(); a.screen = SCR_HOME; a.nav = NAV_NONE; }
         background_poll(win);
         covers_poll(a.now);
+        if (self_update_poll())
+            toast("Sanctum " + self_update_tag() + " is ready: it installs when you close Sanctum (or System Settings > About)", 6);
 
         // fit the canvas into the window
         ImGui_ImplSDLRenderer3_NewFrame();
@@ -300,6 +304,8 @@ int main(int, char **) {
         SDL_RenderPresent(ren);
     }
 
+    // a downloaded update goes in now, for the next start (a restart from About has put it in already)
+    if (self_update_state() == UPD_READY) self_update_apply(false);
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
