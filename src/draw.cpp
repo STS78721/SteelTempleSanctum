@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "covers.h"
+#include "input.h"
 #include "install.h"
 
 namespace sanctum {
@@ -106,29 +107,34 @@ float glyph(Nav n, float x, float y, float size) {
     }
     if (n == NAV_PLUS) return letter_disc("+", p.text, p.bg);
     if (n == NAV_MINUS) return letter_disc("-", p.text, p.bg);
+    // the button that does it, where it sits on the pad (Button layout), drawn as the chosen icons print it
+    FacePos pos = nav_position(n);
     if (st == PAD_PLAYSTATION) {
         circle(cx, cy, r, p.text);
         ImU32 c = p.bg;
         float s = r * 0.45f;
-        switch (n) {
-        case NAV_A:   // cross
+        switch (pos) {
+        case FACE_BOTTOM:   // cross
             dl()->AddLine(P(cx - s, cy - s), P(cx + s, cy + s), c, S(2.4f));
             dl()->AddLine(P(cx - s, cy + s), P(cx + s, cy - s), c, S(2.4f));
             break;
-        case NAV_B: dl()->AddCircle(P(cx, cy), S(s * 1.05f), c, 24, S(2.4f)); break;
-        case NAV_X: dl()->AddRect(P(cx - s, cy - s), P(cx + s, cy + s), c, 0, 0, S(2.4f)); break;
-        case NAV_Y: dl()->AddTriangle(P(cx, cy - s * 1.1f), P(cx + s * 1.1f, cy + s * 0.8f), P(cx - s * 1.1f, cy + s * 0.8f), c, S(2.4f)); break;
-        default: break;
+        case FACE_RIGHT: dl()->AddCircle(P(cx, cy), S(s * 1.05f), c, 24, S(2.4f)); break;
+        case FACE_LEFT: dl()->AddRect(P(cx - s, cy - s), P(cx + s, cy + s), c, 0, 0, S(2.4f)); break;
+        case FACE_TOP: dl()->AddTriangle(P(cx, cy - s * 1.1f), P(cx + s * 1.1f, cy + s * 0.8f), P(cx - s * 1.1f, cy + s * 0.8f), c, S(2.4f)); break;
         }
         return size;
     }
-    const char *l = n == NAV_A ? "A" : n == NAV_B ? "B" : n == NAV_X ? "X" : "Y";
-    if (st == PAD_XBOX) {
-        ImU32 c = n == NAV_A ? IM_COL32(92, 190, 74, 255) : n == NAV_B ? IM_COL32(222, 64, 58, 255)
-                : n == NAV_X ? IM_COL32(58, 128, 228, 255) : IM_COL32(240, 190, 40, 255);
-        return letter_disc(l, c, IM_COL32_WHITE);
+    if (st == PAD_NINTENDO) {   // A right, B bottom, X top, Y left
+        static const char *const nin[] = {"B", "A", "Y", "X"};
+        return letter_disc(nin[pos], p.text, p.bg);
     }
-    return letter_disc(l, p.text, p.bg);
+    static const char *const xb[] = {"A", "B", "X", "Y"};   // A bottom, B right, X left, Y top
+    if (st == PAD_XBOX) {
+        static const ImU32 col[] = {IM_COL32(92, 190, 74, 255), IM_COL32(222, 64, 58, 255), IM_COL32(58, 128, 228, 255),
+                                    IM_COL32(240, 190, 40, 255)};
+        return letter_disc(xb[pos], col[pos], IM_COL32_WHITE);
+    }
+    return letter_disc(xb[pos], p.text, p.bg);
 }
 
 void hint_bar(std::initializer_list<std::pair<Nav, const char *>> hints) {

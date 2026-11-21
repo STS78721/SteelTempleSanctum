@@ -6,7 +6,9 @@
 
 namespace sanctum {
 
-void github_refresh();    // a worker: every port's releases
+void github_load_saved(); // the releases saved last time, at once (before the first frame)
+// a worker: every port's releases; at most every 15 minutes unless forced (the player asked: the + button)
+void github_refresh(bool force = false);
 bool github_busy();
 bool github_poll();       // UI thread: 1 when new release lists were merged into ports()
 std::string github_status();   // "" when fine, else why the lists may be old (offline, limit)

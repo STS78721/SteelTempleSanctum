@@ -195,7 +195,11 @@ void game_frame() {
     case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; break;
     case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; break;
     case NAV_A:
-        if (g_row == ROW_COPIES) { g_row = ROW_ACTIONS, g_action = 0; toast("Play starts this copy"); }
+        if (g_row == ROW_COPIES) {   // remembered: Play starts this copy from now on
+            catalog_prefer(a.game, port.installs[g_copy].dir);
+            g_copy = 0, g_row = ROW_ACTIONS, g_action = 0;
+            toast("Play starts this copy from now on");
+        }
         else if (g_row == ROW_RELEASES) g_row = ROW_NOTES;
         else if (g_row == ROW_ACTIONS) run(acts[g_action].id);
         else if (g_row == ROW_SETTINGS) { /* the tab body opens it (below), with a.nav still A */ }
@@ -325,7 +329,9 @@ void game_frame() {
         break;
     case 1: {
         if (port.releases.empty()) {
-            text(x, by, 17, p.soft, github_busy() ? "Asking GitHub..." : "No releases yet, or GitHub could not be reached.");
+            std::string why = github_status();
+            text(x, by, 17, p.soft, github_busy() ? "Asking GitHub..." : why.empty() ? "No releases yet." : why.c_str());
+            text(x, by + 28, 14, p.dim, "Press + to ask GitHub again.");
             break;
         }
         // the list

@@ -77,6 +77,11 @@ bool scan_running();
 int scan_folders();       // folders looked at so far (for the status line)
 bool scan_poll();         // on the UI thread each frame: 1 when a finished search changed the ports
 void catalog_refilter();  // after the "show build folders" setting changes
+void catalog_prefer(int port, const std::string &dir);   // the copy Play starts, remembered (game page: Use this copy)
+// each copy's version read from its game program (it carries its release tag): on a worker, once the releases are
+// known; cached by the program's size and date in versions.ini
+void version_probe_start();
+bool version_probe_poll();   // UI thread: 1 when versions changed
 // a copy Sanctum has just installed or updated (no search needed)
 void catalog_installed(int port, const std::string &dir, const std::string &version);
 std::string tag_key(const std::string &s);   // "Beta 6.3" == "Beta-6.3"

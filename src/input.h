@@ -4,9 +4,16 @@
 #pragma once
 #include <SDL3/SDL.h>
 
+#include "app.h"
+
 namespace sanctum {
 
 void input_event(const SDL_Event &e);
 void input_frame();   // after the frame's events: picks this frame's Nav (with repeat)
+
+// Settings > Controllers: Button layout (which face button confirms) and Button icons (what the hints draw)
+enum FacePos { FACE_BOTTOM, FACE_RIGHT, FACE_LEFT, FACE_TOP };
+FacePos nav_position(Nav n);   // where the button for A / B / X / Y sits on the pad in use
+void input_refresh_style();    // after Button icons changes
 
 }  // namespace sanctum

@@ -98,6 +98,8 @@ static SDL_Process *g_proc;
 static int g_port = -1;
 static Install g_in;
 static Uint64 g_started;
+static DWORD g_pid;
+static bool g_starting;   // started, its window not up yet: Sanctum shows Starting and keeps the foreground
 static std::map<int, LastRun> g_last;
 
 // the last-run check runs on a worker (THWOMP's checker is a Python start, about a second)
@@ -149,9 +151,59 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     }
     g_port = port_i, g_in = in, g_started = SDL_GetTicks();
     g_last.erase(port_i);
-    SDL_MinimizeWindow(w);
+    // Sanctum stays in front (its Starting screen) until the game's window is up, then hands it the foreground.
+    // Minimising at once would let Windows give the foreground to whatever was behind (Explorer), and a game that
+    // never gets it neither takes the keyboard nor hides and holds the mouse pointer.
+    g_pid = (DWORD)SDL_GetNumberProperty(SDL_GetProcessProperties(g_proc), SDL_PROP_PROCESS_PID_NUMBER, 0);
+    if (g_pid) AllowSetForegroundWindow(g_pid);
+    g_starting = true;
+    (void)w;
     return true;
 }
+
+// ---- the foreground, handed over and taken back
+struct Find {
+    DWORD pid;
+    HWND found;
+};
+static BOOL CALLBACK find_window(HWND h, LPARAM lp) {
+    Find *f = (Find *)lp;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (pid != f->pid || !IsWindowVisible(h) || GetWindow(h, GW_OWNER)) return TRUE;
+    if (GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+    wchar_t cls[64];
+    if (GetClassNameW(h, cls, 64) && (!wcscmp(cls, L"ConsoleWindowClass") || !wcscmp(cls, L"PseudoConsoleWindow")))
+        return TRUE;   // a console beside the game is not the game
+    RECT r;
+    if (!GetWindowRect(h, &r) || r.right - r.left < 160 || r.bottom - r.top < 120) return TRUE;   // a real window
+    f->found = h;
+    return FALSE;
+}
+
+// Windows lets only the foreground process give the foreground away; when Sanctum is not it (coming back from a
+// game), a tap of Alt lifts that lock for the next call, the usual way for a program the player is returning to.
+static void bring_to_front(HWND h, bool unlock) {
+    if (!h) return;
+    if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
+    if (unlock) {
+        INPUT in[2] = {};
+        in[0].type = in[1].type = INPUT_KEYBOARD;
+        in[0].ki.wVk = in[1].ki.wVk = VK_MENU;
+        in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(2, in, sizeof(INPUT));
+    }
+    SetForegroundWindow(h);
+    BringWindowToTop(h);
+    SetFocus(h);
+}
+
+static HWND hwnd_of(SDL_Window *w) {
+    return (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(w), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+}
+
+bool launch_starting() { return g_proc && g_starting; }
+std::string launch_starting_title() { return g_port >= 0 ? ports()[g_port].title : ""; }
 
 bool game_running() { return g_proc != nullptr; }
 int running_port() { return g_proc ? g_port : -1; }
@@ -312,12 +364,29 @@ void launch_poll(SDL_Window *w) {
     }
     if (!g_proc) return;
     int code = 0;
-    if (!SDL_WaitProcess(g_proc, false, &code)) return;
+    if (!SDL_WaitProcess(g_proc, false, &code)) {
+        if (g_starting) {
+            // the game's window is up: it gets the foreground (Sanctum still has it, so this is allowed), then
+            // Sanctum steps aside. A game slow to open a window (a first shader build) still gets it within 2 minutes.
+            Find f{g_pid, nullptr};
+            if (g_pid) EnumWindows(find_window, (LPARAM)&f);
+            if (f.found || SDL_GetTicks() - g_started > 120000) {
+                g_starting = false;
+                bring_to_front(f.found, false);
+                SDL_MinimizeWindow(w);
+            }
+        }
+        return;
+    }
     SDL_DestroyProcess(g_proc);
     g_proc = nullptr;
+    bool was_starting = g_starting;
+    g_starting = false;
     int secs = (int)((SDL_GetTicks() - g_started) / 1000);
     if (secs >= 10) playtime_add(g_port, secs);
+    // back in front: restored (still fullscreen if it was), and given the foreground the game just let go of
     SDL_RestoreWindow(w);
+    bring_to_front(hwnd_of(w), !was_starting);
     SDL_RaiseWindow(w);
     // back on the game's page, its last run being judged
     game_show_overview(g_port);

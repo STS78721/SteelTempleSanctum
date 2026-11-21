@@ -34,6 +34,8 @@ std::string missing_for_play(const Port &p, const Install &in);   // "" when rea
 
 bool launch(SDL_Window *w, int port, const Install &in, bool own_launcher);
 bool game_running();
+bool launch_starting();             // started, its window not up yet: Sanctum shows its Starting screen
+std::string launch_starting_title();
 int running_port();                 // -1 when none
 double running_seconds();
 void close_game();                  // ends the running game (the player asked, from Sanctum)

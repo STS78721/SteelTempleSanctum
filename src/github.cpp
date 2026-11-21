@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <ctime>
 #include <mutex>
 #include <vector>
 
@@ -23,7 +24,7 @@ std::string local_dir() {
 static std::mutex g_lock;
 static std::vector<std::pair<int, std::vector<Release>>> g_ready;
 static std::string g_status;
-static std::atomic<bool> g_busy{false};
+static std::atomic<bool> g_busy{false}, g_force{false};
 
 static AssetKind kind_of(const std::string &name) {
     std::string n;
@@ -75,14 +76,13 @@ static int worker(void *) {
     SDL_CreateDirectory(dir.c_str());
     std::string status;
     const auto &ps = ports();
-    // the saved lists first, so everything shows at once even offline
-    for (int i = 0; i < (int)ps.size(); ++i) {
-        std::vector<Release> rs;
-        if (parse(load(dir + ps[i].id + ".json"), rs) && !rs.empty()) {
-            std::lock_guard<std::mutex> l(g_lock);
-            g_ready.push_back({i, std::move(rs)});
-        }
-    }
+    // GitHub allows 60 questions an hour without an account, and an "unchanged" answer counts too: asked at most
+    // every 15 minutes (the + button asks at once)
+    long long last = atoll(load(dir + "last-check").c_str()), now = (long long)time(nullptr);
+    if (!g_force && now - last < 15 * 60) { g_busy = false; return 0; }
+    g_force = false;
+    std::string stamp = std::to_string(now);
+    SDL_SaveFile((dir + "last-check").c_str(), stamp.data(), stamp.size());
     for (int i = 0; i < (int)ps.size(); ++i) {
         std::string base = dir + ps[i].id;
         HttpResult r = http_get(std::string("https://api.github.com/repos/") + ps[i].repo + "/releases?per_page=12",
@@ -104,7 +104,18 @@ static int worker(void *) {
     return 0;
 }
 
-void github_refresh() {
+// the saved lists, on the UI thread before the first frame: a port's page never waits for GitHub, even offline
+void github_load_saved() {
+    std::string dir = local_dir() + "releases\\";
+    auto &ps = ports();
+    for (auto &p : ps) {
+        std::vector<Release> rs;
+        if (parse(load(dir + p.id + ".json"), rs) && !rs.empty()) p.releases = std::move(rs);
+    }
+}
+
+void github_refresh(bool force) {
+    if (force) g_force = true;
     if (g_busy.exchange(true)) return;
     SDL_Thread *t = SDL_CreateThread(worker, "github", nullptr);
     if (t) SDL_DetachThread(t);

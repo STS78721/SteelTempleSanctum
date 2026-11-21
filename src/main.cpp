@@ -14,6 +14,8 @@
 //   SANCTUM_FOCUS=<port id> Home starts focused on that port (tests: never count tiles, the order changes)
 #include <SDL3/SDL.h>
 
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -56,6 +58,23 @@ void go_back() {
 
 void toast(const std::string &t, double seconds) { g_app.toast = {t, g_app.now + seconds, g_app.now}; }
 
+void sanctum_log(const char *fmt, ...) {
+    static SDL_Mutex *lock = SDL_CreateMutex();
+    const char *path = getenv("SANCTUM_LOG");
+    if (!path) return;
+    char line[2048];
+    va_list ap;
+    va_start(ap, fmt);
+    SDL_vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    SDL_LockMutex(lock);
+    if (FILE *f = fopen(path, "a")) {
+        fprintf(f, "%8.3f %s\n", SDL_GetTicks() / 1000.0, line);
+        fclose(f);
+    }
+    SDL_UnlockMutex(lock);
+}
+
 void set_fullscreen(bool on) {
     SDL_SetWindowFullscreen(g_app.window, on);   // borderless at the desktop's resolution: instant, no mode change
     if (cfg().fullscreen != on) {
@@ -67,6 +86,16 @@ void set_fullscreen(bool on) {
 bool hover(float x, float y, float w, float h) {
     ImVec2 m = g_app.mouse;
     return m.x >= x && m.x < x + w && m.y >= y && m.y < y + h;
+}
+
+// what the workers finished, taken in every frame, and while a game runs too
+static void background_poll(SDL_Window *win) {
+    launch_poll(win);
+    install_poll(win);
+    bool found = scan_poll();
+    bool fresh = github_poll();
+    if (found || fresh) version_probe_start();   // new copies or new tags: read the programs' versions again
+    version_probe_poll();
 }
 
 static Nav nav_of(const std::string &t) {
@@ -135,6 +164,8 @@ int main(int, char **) {
 
     library_load();
     playtime_load();
+    github_load_saved();
+    version_probe_start();   // the saved copies' versions, from their programs
     scan_start();
     github_refresh();
     covers_init(ren);
@@ -165,7 +196,7 @@ int main(int, char **) {
                 ImGui_ImplSDL3_ProcessEvent(&e);
                 input_event(e);
             }
-            launch_poll(win);
+            background_poll(win);   // downloads, the search, GitHub go on while the game is in front
             last = SDL_GetTicksNS();
             continue;
         }
@@ -190,11 +221,8 @@ int main(int, char **) {
         if (frame >= 30 && (frame - 30) % 8 == 0 && (size_t)((frame - 30) / 8) < script.size())
             a.nav = script[(frame - 30) / 8];
         if (a.nav == NAV_HOME) { a.back.clear(); a.screen = SCR_HOME; a.nav = NAV_NONE; }
-        launch_poll(win);
-        install_poll(win);
+        background_poll(win);
         covers_poll(a.now);
-        scan_poll();
-        github_poll();
 
         // fit the canvas into the window
         ImGui_ImplSDLRenderer3_NewFrame();
@@ -203,6 +231,11 @@ int main(int, char **) {
         ImVec2 ds = io.DisplaySize;
         a.scale = SDL_min(ds.x / 1280.0f, ds.y / 720.0f);
         a.ox = (ds.x - 1280 * a.scale) / 2, a.oy = (ds.y - 720 * a.scale) / 2;
+
+        // a game starting: the screens wait under the Starting screen (B cancels a start that hangs)
+        bool starting = launch_starting();
+        Nav start_nav = a.nav;
+        if (starting) a.nav = NAV_NONE, a.clicked = false;
 
         switch (a.screen) {
         case SCR_HOME: home_frame(); break;
@@ -215,6 +248,25 @@ int main(int, char **) {
         case SCR_DOWNLOADS: downloads_frame(); break;
         case SCR_NEWS: news_frame(); break;
         case SCR_PORT_SETTINGS: port_settings_frame(); break;
+        }
+        if (starting) {
+            const Palette &p = pal();
+            int pi = running_port();
+            if (start_nav == NAV_B) { close_game(); toast("Start cancelled"); }
+            if (pi >= 0) {
+                const Port &port = ports()[pi];
+                float in = SDL_min(1.0f, (float)running_seconds() * 4);   // fades in over a quarter second
+                dl()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, with_alpha(mix(p.bg, port.colours.deep, 0.5f), (int)(255 * in)));
+                tile(port, 640 - 130, 150, 260, in, false);
+                text(640, 438, 28, with_alpha(p.text, (int)(255 * in)), fit(28, port.title, 1000).c_str(), 0.5f);
+                float t = (float)a.now * 5;
+                for (int i = 0; i < 3; ++i) {   // three dots, the console's "loading"
+                    float k = 0.5f + 0.5f * SDL_sinf(t - i * 0.9f);
+                    circle(616 + i * 24, 506, 5 + 2 * k, with_alpha(port.colours.accent, (int)((90 + 165 * k) * in)));
+                }
+                text(640, 532, 16, with_alpha(p.soft, (int)(255 * in)), "Starting the game...", 0.5f);
+                hint_bar({{NAV_B, "Cancel"}});
+            }
         }
         toast_draw();
 

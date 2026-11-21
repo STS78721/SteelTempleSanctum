@@ -43,16 +43,50 @@ static void hold(Nav n, bool down) {
     }
 }
 
+static PadStyle g_pad_native = PAD_GENERIC;   // the pad in use, before the Button icons setting
+
 static void use_pad(SDL_JoystickID id) {
     SDL_Gamepad *pad = SDL_GetGamepadFromID(id);
     if (!pad) return;
     if (cfg().hide_cursor && SDL_CursorVisible()) SDL_HideCursor();
-    app().pad = style_of(pad);
+    g_pad_native = style_of(pad);
+    static const PadStyle icons[] = {PAD_GENERIC, PAD_NINTENDO, PAD_XBOX, PAD_PLAYSTATION};
+    app().pad = cfg().button_icons ? icons[cfg().button_icons % 4] : g_pad_native;   // Settings > Controllers
     const char *n = SDL_GetGamepadName(pad);
     app().pad_name = n ? n : "Controller";
 }
 
+void input_refresh_style() {   // after Button icons changes
+    if (app().pad == PAD_KEYBOARD) return;
+    static const PadStyle icons[] = {PAD_GENERIC, PAD_NINTENDO, PAD_XBOX, PAD_PLAYSTATION};
+    app().pad = cfg().button_icons ? icons[cfg().button_icons % 4] : g_pad_native;
+}
+
+// Where an action's button sits on the pad: with Button layout Automatic, where the pad's own printed label puts it
+// (A right on a Nintendo pad, at the bottom on others); Nintendo layout always A right, Xbox layout always A bottom.
+FacePos nav_position(Nav n) {
+    int layout = cfg().pad_layout;
+    bool a_right = layout == 1 || (layout == 0 && g_pad_native == PAD_NINTENDO);
+    switch (n) {
+    case NAV_A: return a_right ? FACE_RIGHT : FACE_BOTTOM;
+    case NAV_B: return a_right ? FACE_BOTTOM : FACE_RIGHT;
+    case NAV_X: return a_right ? FACE_TOP : FACE_LEFT;
+    case NAV_Y: return a_right ? FACE_LEFT : FACE_TOP;
+    default: return FACE_BOTTOM;
+    }
+}
+
 static Nav face(SDL_Gamepad *pad, SDL_GamepadButton b) {
+    if (cfg().pad_layout) {   // a fixed layout: by position on the pad, whatever is printed on the buttons
+        bool a_right = cfg().pad_layout == 1;
+        switch (b) {
+        case SDL_GAMEPAD_BUTTON_SOUTH: return a_right ? NAV_B : NAV_A;
+        case SDL_GAMEPAD_BUTTON_EAST: return a_right ? NAV_A : NAV_B;
+        case SDL_GAMEPAD_BUTTON_WEST: return a_right ? NAV_Y : NAV_X;
+        case SDL_GAMEPAD_BUTTON_NORTH: return a_right ? NAV_X : NAV_Y;
+        default: return NAV_NONE;
+        }
+    }
     switch (SDL_GetGamepadButtonLabel(pad, b)) {   // the label printed on it, not its position
     case SDL_GAMEPAD_BUTTON_LABEL_A:
     case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return NAV_A;

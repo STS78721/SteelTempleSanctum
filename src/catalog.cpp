@@ -3,10 +3,13 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <functional>
+#include <map>
 #include <atomic>
 #include <cstring>
 #include <mutex>
 
+#include "app.h"
 #include "config.h"
 #include "install.h"
 
@@ -41,6 +44,8 @@ std::vector<Port> &ports() { return g_ports; }
 static void library_save();
 static bool exists(const std::string &p);
 static void refilter();
+static void rank(std::vector<Install> &v);
+static void apply_known_versions(const Port &p, std::vector<Install> &v);
 
 bool port_files(const Port &p, const std::string &dir) {
     return exists(dir + "\\" + p.exe) || (p.launcher && exists(dir + "\\" + p.launcher));
@@ -127,15 +132,64 @@ static bool is_dev_path(const std::string &dir) {
     return false;
 }
 
-// installs = the copies a player should see: every copy when build folders are shown, else the others
+// "0.2.10" after "0.2.9", "Beta-6.3" after "Beta-6.2b": numbers compared as numbers, the rest as text
+static bool version_newer(const std::string &a, const std::string &b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (SDL_isdigit((unsigned char)a[i]) && SDL_isdigit((unsigned char)b[j])) {
+            size_t i2 = i, j2 = j;
+            while (i2 < a.size() && SDL_isdigit((unsigned char)a[i2])) ++i2;
+            while (j2 < b.size() && SDL_isdigit((unsigned char)b[j2])) ++j2;
+            long long x = atoll(a.substr(i, i2 - i).c_str()), y = atoll(b.substr(j, j2 - j).c_str());
+            if (x != y) return x > y;
+            i = i2, j = j2;
+            continue;
+        }
+        char x = (char)SDL_tolower((unsigned char)a[i]), y = (char)SDL_tolower((unsigned char)b[j]);
+        if (x == ' ' || x == '-') x = '-';
+        if (y == ' ' || y == '-') y = '-';
+        if (x != y) return x > y;
+        ++i, ++j;
+    }
+    return a.size() - i > b.size() - j;   // "0.2.2c" after "0.2.2"
+}
+
+// best first: a Setup Wizard's install, a player's copy before a build folder, the newest version (an unknown one
+// last), one with its launcher, then the shortest path
+static void rank(std::vector<Install> &v) {
+    std::stable_sort(v.begin(), v.end(), [](const Install &a, const Install &b) {
+        if (a.registered != b.registered) return a.registered;
+        if (a.dev != b.dev) return !a.dev;
+        if (a.version.empty() != b.version.empty()) return !a.version.empty();
+        if (tag_key(a.version) != tag_key(b.version)) return version_newer(a.version, b.version);
+        if (a.launcher != b.launcher) return a.launcher;
+        return a.dir.size() < b.dir.size();
+    });
+}
+
+// installs = the copies a player sees: all of them (build folders too, ranked last) unless Settings hides those;
+// the copy the player chose ("Use this copy") first, so Play starts it
 static void refilter() {
     for (Port &p : g_ports) {
         p.installs.clear();
         p.hidden = 0;
         for (const Install &in : p.all)
-            if (cfg().show_dev || !in.dev) p.installs.push_back(in);
+            if (!cfg().hide_dev || !in.dev) p.installs.push_back(in);
             else p.hidden++;
+        auto it = cfg().prefer.find(p.id);
+        if (it == cfg().prefer.end()) continue;
+        for (size_t i = 0; i < p.installs.size(); ++i)
+            if (lower(p.installs[i].dir) == lower(it->second)) {
+                std::rotate(p.installs.begin(), p.installs.begin() + i, p.installs.begin() + i + 1);
+                break;
+            }
     }
+}
+
+void catalog_prefer(int port, const std::string &dir) {
+    cfg().prefer[g_ports[port].id] = dir;
+    config_save();
+    refilter();
 }
 
 void catalog_refilter() { refilter(); }
@@ -291,17 +345,9 @@ static int search(void *) {
         walk(root, 6, out);
     }
 #endif
-    // best first: a registered install, a player's copy before a build folder, one with its launcher, the newest
-    // version string, then the shortest path
     for (auto &v : out) {
         for (Install &in : v) in.dev = !in.registered && is_dev_path(in.dir);
-        std::sort(v.begin(), v.end(), [](const Install &a, const Install &b) {
-            if (a.registered != b.registered) return a.registered;
-            if (a.dev != b.dev) return !a.dev;
-            if (a.launcher != b.launcher) return a.launcher;
-            if (a.version != b.version) return a.version > b.version;
-            return a.dir.size() < b.dir.size();
-        });
+        rank(v);
     }
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -364,7 +410,209 @@ void library_load() {
                 p.all.push_back(in);
             }
     }
+    for (Port &p : g_ports) {   // the versions read last time, from the first frame on
+        apply_known_versions(p, p.all);
+        rank(p.all);
+    }
     refilter();
+}
+
+// ---- versions read from the game programs
+// A port's program carries its release tag as text (rt_port_version: "0.2.2c", "Alpha 0.1.3b", "Beta 6.3"), which
+// is the truth about a copy: a Setup Wizard's registry entry and a VERSION file both go stale when a copy is updated
+// another way. The worker reads each program once (8 MB at a time) for every spelling of the port's release tags,
+// a match standing alone (no letter, digit or dot either side); the newest tag found wins.
+struct ProbeJob {
+    int port;
+    std::string dir, exe;
+    std::vector<std::string> tags;   // newest first
+};
+struct ProbeHit {
+    int port;
+    std::string dir, version;
+};
+static std::mutex g_probe_lock;
+static std::vector<ProbeHit> g_probe_hits;
+static std::atomic<bool> g_probe_running{false}, g_probe_again{false};
+static std::map<std::string, std::string> g_probe_cache;   // "<exe>|<size>|<time>" -> version ("" = none found)
+static bool g_probe_cache_loaded = false;
+static std::string probe_cache_path() { return config_dir() + "versions.ini"; }
+
+static void probe_cache_load() {
+    g_probe_cache_loaded = true;
+    size_t n = 0;
+    char *d = (char *)SDL_LoadFile(probe_cache_path().c_str(), &n);
+    if (!d) return;
+    std::string all(d, n);
+    SDL_free(d);
+    size_t at = 0;
+    while (at < all.size()) {
+        size_t end = all.find('\n', at);
+        if (end == std::string::npos) end = all.size();
+        std::string l = all.substr(at, end - at);
+        at = end + 1;
+        size_t eq = l.rfind('=');
+        if (eq != std::string::npos && l[0] != '#') g_probe_cache[l.substr(0, eq)] = l.substr(eq + 1);
+    }
+}
+
+static void probe_cache_save() {
+    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>=<version>)\n";
+    for (auto &e : g_probe_cache) s += e.first + "=" + e.second + "\n";
+    std::string tmp = probe_cache_path() + ".tmp";
+    if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), probe_cache_path().c_str());
+}
+
+static std::string probe_key(const std::string &exe) {
+    SDL_PathInfo i;
+    if (!SDL_GetPathInfo(exe.c_str(), &i)) return {};
+    return exe + "|" + std::to_string(i.size) + "|" + std::to_string(i.modify_time);
+}
+
+static std::string probe_file(const std::string &exe, const std::vector<std::string> &tags) {
+    // every spelling: as tagged, '-' as ' ' ("Alpha-0.1.1" / "Alpha 0.1.1"), and with a leading v
+    std::vector<std::pair<std::string, int>> pats;   // (text, tag index)
+    for (int t = 0; t < (int)tags.size(); ++t) {
+        std::string a = tags[t], b = tags[t];
+        std::replace(b.begin(), b.end(), '-', ' ');
+        for (const std::string &s : {a, b, "v" + a})
+            if (s.size() >= 3) pats.push_back({s, t});
+    }
+    SDL_IOStream *io = SDL_IOFromFile(exe.c_str(), "rb");
+    if (!io) return {};
+    const size_t chunk = 8 << 20, keep = 64;
+    std::vector<char> buf(chunk + keep);
+    size_t have = 0;
+    int best = (int)tags.size();
+    auto clean = [](char c) { return !SDL_isalnum((unsigned char)c) && c != '.' && c != '-'; };
+    for (;;) {
+        size_t got = SDL_ReadIO(io, buf.data() + have, chunk);
+        size_t len = have + got;
+        for (auto &p : pats) {
+            if (p.second >= best) continue;
+            const std::string &s = p.first;
+            auto it = buf.begin(), end = buf.begin() + len;
+            std::boyer_moore_horspool_searcher<std::string::const_iterator> bm(s.begin(), s.end());
+            while ((it = std::search(it, end, bm)) != end) {
+                size_t pos = it - buf.begin();
+                bool l = pos == 0 || clean(buf[pos - 1]);
+                bool r = pos + s.size() < len && clean(buf[pos + s.size()]);
+                if (l && r) { best = p.second; break; }
+                ++it;
+            }
+        }
+        if (best == 0 || got == 0) break;   // the newest tag found: nothing newer to look for
+        // keep the end of this chunk, so a tag across the boundary is still found
+        size_t k = std::min(keep, len);
+        memmove(buf.data(), buf.data() + len - k, k);
+        have = k;
+    }
+    SDL_CloseIO(io);
+    return best < (int)tags.size() ? tags[best] : std::string();
+}
+
+static int probe_worker(void *p) {
+    auto *jobs = (std::vector<ProbeJob> *)p;
+    for (const ProbeJob &j : *jobs) {
+        std::string key = probe_key(j.exe), v;
+        bool cached;
+        {
+            std::lock_guard<std::mutex> l(g_probe_lock);
+            auto it = g_probe_cache.find(key);
+            cached = it != g_probe_cache.end();
+            if (cached) v = it->second;
+        }
+        if (!cached && !key.empty()) {
+            v = probe_file(j.exe, j.tags);
+            std::lock_guard<std::mutex> l(g_probe_lock);
+            g_probe_cache[key] = v;
+            probe_cache_save();   // after every program: a closed Sanctum keeps what it already read
+        }
+        sanctum_log("version: %s -> %s (%s, %d tags)", j.exe.c_str(), v.empty() ? "none" : v.c_str(),
+                    cached ? "saved" : "read", (int)j.tags.size());
+        if (!v.empty()) {
+            std::lock_guard<std::mutex> l(g_probe_lock);
+            g_probe_hits.push_back({j.port, j.dir, v});
+        }
+    }
+    {
+        std::lock_guard<std::mutex> l(g_probe_lock);
+        probe_cache_save();
+    }
+    delete jobs;
+    g_probe_running = false;
+    return 0;
+}
+
+// the versions already read (versions.ini), put on these copies at once: what a copy's program says stays true
+// while the program is unchanged, whatever a later search reports
+static void apply_known_versions(const Port &p, std::vector<Install> &v) {
+    if (!g_probe_cache_loaded) probe_cache_load();
+    for (Install &in : v) {
+        std::string key = probe_key(in.dir + "\\" + p.exe);
+        if (key.empty()) continue;
+        std::lock_guard<std::mutex> l(g_probe_lock);
+        auto it = g_probe_cache.find(key);
+        if (it != g_probe_cache.end() && !it->second.empty()) in.version = it->second;
+    }
+}
+
+void version_probe_start() {
+    if (g_probe_running) { g_probe_again = true; return; }
+    if (!g_probe_cache_loaded) probe_cache_load();
+    // each port's copy in use first (the one its tile and Play use), then the other copies, then build folders:
+    // a first read of every program on a developer's PC can take minutes, and the copies that matter come first
+    // per port: its copy in use, the player's other copies, then build folders; then the ports taken in turn
+    // (each one's 1st copy, each one's 2nd, ...), so one port with forty large copies holds nobody else up
+    std::vector<std::vector<ProbeJob>> per(g_ports.size());
+    for (int i = 0; i < (int)g_ports.size(); ++i) {
+        const Port &p = g_ports[i];
+        if (p.releases.empty()) continue;   // the tags to look for come from GitHub (or its saved copy)
+        std::vector<std::string> tags;
+        for (const Release &r : p.releases) tags.push_back(r.tag);
+        for (int pass = 0; pass < 3; ++pass)
+            for (const Install &in : p.all) {
+                bool first = !p.installs.empty() && lower(p.installs[0].dir) == lower(in.dir);
+                if ((pass == 0) != first || (pass == 1 && in.dev) || (pass == 2 && !in.dev)) continue;
+                std::string exe = in.dir + "\\" + p.exe;
+                if (exists(exe)) per[i].push_back({i, in.dir, exe, tags});
+            }
+    }
+    auto *jobs = new std::vector<ProbeJob>;
+    for (size_t k = 0;; ++k) {
+        bool any = false;
+        for (auto &v : per)
+            if (k < v.size()) jobs->push_back(v[k]), any = true;
+        if (!any) break;
+    }
+    sanctum_log("version: %d programs to read", (int)jobs->size());
+    if (jobs->empty()) { delete jobs; return; }
+    g_probe_running = true;
+    SDL_Thread *t = SDL_CreateThread(probe_worker, "versions", jobs);
+    if (t) SDL_DetachThread(t);
+    else { delete jobs; g_probe_running = false; }
+}
+
+bool version_probe_poll() {
+    std::vector<ProbeHit> hits;
+    {
+        std::lock_guard<std::mutex> l(g_probe_lock);
+        hits.swap(g_probe_hits);
+    }
+    bool changed = false;
+    for (const ProbeHit &h : hits)
+        for (Install &in : g_ports[h.port].all)
+            if (lower(in.dir) == lower(h.dir) && in.version != h.version) {
+                sanctum_log("version: %s now %s (was %s)", in.dir.c_str(), h.version.c_str(), in.version.c_str());
+                in.version = h.version, changed = true;
+            }
+    if (changed) {   // with their real versions the copies may rank differently (the newest becomes the main one)
+        for (Port &p : g_ports) rank(p.all);
+        refilter();
+        library_save();
+    }
+    if (!g_probe_running && g_probe_again.exchange(false)) version_probe_start();
+    return changed;
 }
 
 bool scan_poll() {
@@ -385,10 +633,13 @@ bool scan_poll() {
             for (const Install &g : got) found |= lower(g.dir) == lower(o.dir);
             if (!found && port_files(g_ports[i], o.dir)) got.push_back(o);
         }
+        // a version read from the copy's own program beats what the search found (a registry entry, a VERSION file)
+        apply_known_versions(g_ports[i], got);
         bool same = now.size() == got.size();
         for (size_t k = 0; same && k < now.size(); ++k) same = now[k].dir == got[k].dir && now[k].version == got[k].version;
         if (!same) changed = true;
         now = got;
+        rank(now);
     }
     refilter();
     library_save();

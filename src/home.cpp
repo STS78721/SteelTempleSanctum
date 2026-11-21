@@ -118,7 +118,7 @@ void home_frame() {
             break;
         case NAV_PLUS:   // look again: this PC and GitHub
             if (!scan_running()) scan_start();
-            github_refresh();
+            github_refresh(true);
             toast("Looking for ports on this PC and new releases on GitHub");
             break;
         case NAV_B: if (g_zone != Z_ROW) g_zone = Z_ROW; break;

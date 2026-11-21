@@ -7,6 +7,7 @@
 #include "config.h"
 #include "covers.h"
 #include "draw.h"
+#include "input.h"
 #include "install.h"
 
 namespace sanctum {
@@ -23,7 +24,7 @@ struct Row {
     int id;          // what A does
     bool toggle = false, on = false;
 };
-enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_INFO };
+enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_INFO };
 
 static std::vector<Row> rows_of(int cat) {
     std::vector<Row> r;
@@ -53,7 +54,7 @@ static std::vector<Row> rows_of(int cat) {
     case CAT_LIBRARY:
         r.push_back({scan_running() ? "Searching this PC..." : "Search this PC again", "", R_SEARCH});
         r.push_back({"Install new ports into", library_dir(), R_LIBDIR});
-        r.push_back({"Include copies in build and backup folders", "", R_DEV, true, c.show_dev});
+        r.push_back({"Include copies in build and backup folders", "", R_DEV, true, !c.hide_dev});
         for (auto &p : ports()) {
             std::string v = p.installs.empty() ? (p.hidden ? "Only in build folders" : "Not found")
                           : p.installs.size() == 1 ? p.installs[0].dir
@@ -61,9 +62,15 @@ static std::vector<Row> rows_of(int cat) {
             r.push_back({p.title, v, R_PORT});
         }
         break;
-    case CAT_CONTROLLERS:
+    case CAT_CONTROLLERS: {
+        static const char *const layouts[] = {"Automatic", "Nintendo (A right)", "Xbox (A bottom)"};
+        static const char *const icons[] = {"Automatic", "Nintendo", "Xbox", "PlayStation"};
+        r.push_back({"Button layout", layouts[c.pad_layout % 3], R_LAYOUT});
+        r.push_back({"Button icons", icons[c.button_icons % 4], R_ICONS});
         r.push_back({"Test controllers", "", R_PADS});
+        r.push_back({"Automatic layout", "A confirms where each pad prints it", R_INFO});
         break;
+    }
     case CAT_ABOUT:
         r.push_back({"SteelTemple Sanctum", "Build step 1", R_INFO});
         r.push_back({"Settings folder", config_dir(), R_INFO});
@@ -84,7 +91,7 @@ static void act(const Row &r) {
     case R_FOLDER: folder_open(c.cover_dir); return;
     case R_RELOAD: covers_reload(); toast("Reading your cover art"); return;
     case R_SEARCH: scan_start(); return;
-    case R_DEV: c.show_dev = !c.show_dev; catalog_refilter(); break;
+    case R_DEV: c.hide_dev = !c.hide_dev; catalog_refilter(); break;
     case R_LIBDIR: folder_open(library_dir(), FOLDER_LIBRARY); return;
     case R_PORT: {
         for (int i = 0; i < (int)ports().size(); ++i)
@@ -92,6 +99,12 @@ static void act(const Row &r) {
         return;
     }
     case R_PADS: go(SCR_CONTROLLERS); return;
+    case R_LAYOUT:   // takes effect on the next press: the press that changed it was read the old way
+        c.pad_layout = (c.pad_layout + 1) % 3;
+        toast(c.pad_layout == 1 ? "Switch style: A on the right confirms" : c.pad_layout == 2 ? "Xbox style: A at the bottom confirms"
+                                                                               : "Confirm follows each pad's own labels");
+        break;
+    case R_ICONS: c.button_icons = (c.button_icons + 1) % 4; input_refresh_style(); break;
     default: return;
     }
     config_save();
@@ -344,7 +357,9 @@ void controllers_frame() {
         circle(1120 + lx * 20, y + 52 + ly * 20, 10, p.focus);
     }
     SDL_free(ids);
-    text(96, 640 - 26, 15, p.dim, "Pads are read by the label on each button, so A (or Cross) always confirms and B (or Circle) goes back.");
+    text(96, 640 - 26, 15, p.dim, cfg().pad_layout == 1 ? "Button layout: Nintendo, so the right face button confirms and the bottom one goes back."
+                                  : cfg().pad_layout == 2 ? "Button layout: Xbox, so the bottom face button confirms and the right one goes back."
+                                  : "Button layout: Automatic, so A (or Cross) confirms where the pad prints it. System Settings > Controllers changes it.");
     hint_bar({{NAV_B, "Back"}});
 }
 

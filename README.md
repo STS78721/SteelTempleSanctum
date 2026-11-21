@@ -23,8 +23,10 @@ mods come next (see `../SteelTemple-Sanctum-Design/DESIGN.md`).
 | Home from anywhere | Home (Guide) | Home | |
 | Fullscreen (on by default) | System Settings > Display | F11, Alt+Enter | |
 
-Pads are read by the label printed on each button, so A always confirms on Xbox, Nintendo and PlayStation pads,
-and the hints show the buttons of the pad in use.
+As in the ports' F1 menus, **System Settings > Controllers** sets the **Button layout**: Automatic (A confirms where
+each pad prints it: right on Nintendo pads, at the bottom on others), Nintendo (A right, Switch style, on any pad) or
+Xbox (A bottom); and the **Button icons** the hints show: Automatic (the pad's own), Nintendo, Xbox or PlayStation.
+The hints always show the button that does it, where it sits, in the chosen icons.
 
 ## Cover art
 
@@ -93,10 +95,13 @@ python tools/extract_settings.py totk       # one
 At start the list from the last search shows at once; a new search runs in the background: the Setup Wizards'
 entries in Windows' apps list, then every fixed drive, six folders deep, for each port's program (`mkw.exe` with
 `mkwgame.id`, `mastersword.exe`, `totk.exe`, `ff.exe`, `mtf.exe`, `dkb.exe`, or the port's own launcher alone), plus Sanctum's
-own install folder. A copy found before and still there is never dropped. Every copy is kept; the best (Setup
+own install folder. A copy found before and still there is never dropped. Each copy's version is read from its
+game program, which carries its release tag (`0.2.2c`, `Alpha 0.1.3b`, `Beta 6.3`): truer than a Setup Wizard's
+registry entry or a VERSION file, which go stale when a copy is updated another way. Read once per program on a
+worker, the copies in use first, and kept in `versions.ini`. Every copy is kept; the best (Setup
 Wizard, then one with its launcher, then the newest version) is the one Play starts, and the game page lets you
-pick another. Copies inside build, staging or backup folders are hidden unless
-**System Settings > Ports on this PC > Include copies in build and backup folders** is on.
+pick another, which is then remembered ("Use this copy"). Copies inside build, staging or backup folders are shown
+too, ranked last; **System Settings > Ports on this PC** can leave them out.
 
 ## Where things are
 
@@ -123,7 +128,8 @@ python tools/build.py --llvm-mingw <llvm-mingw folder> --sdl <SDL3 static prefix
 Test hooks: `SANCTUM_NAV="R R A"` (presses from frame 30, one per 8 frames), `SANCTUM_SHOT=<file.bmp>` with
 `SANCTUM_SHOT_FRAME=<n>` (saves that frame and quits; with `SANCTUM_SHOT_IDLE=1` the first frame from then on with
 the downloads finished), `SANCTUM_THEME=light`, `SANCTUM_WINDOWED=1`, `SANCTUM_LIBRARY=<dir>` (install there this run), `SANCTUM_FOCUS=<port id>` (start on that port: tests never
-count tiles, since the row's order follows what was played last).
+count tiles, since the row's order follows what was played last), `SANCTUM_LOG=<file>` (a debug log: the version
+reads, ...). `tools/build.py --name <name>` builds a copy under another name while Sanctum is running.
 
 | File | What it is |
 |---|---|

@@ -31,6 +31,7 @@ def main() -> None:
     ap.add_argument("--llvm-mingw", default=os.environ.get("SANCTUM_LLVM_MINGW"))
     ap.add_argument("--sdl", default=os.environ.get("SANCTUM_SDL"))
     ap.add_argument("--debug", action="store_true", help="no optimisation, a console for logs")
+    ap.add_argument("--name", default="SteelTemple-Sanctum", help="the program's file name (a test copy while one runs)")
     a = ap.parse_args()
     if not a.llvm_mingw or not a.sdl:
         sys.exit("give --llvm-mingw and --sdl (or set SANCTUM_LLVM_MINGW and SANCTUM_SDL)")
@@ -64,7 +65,7 @@ def main() -> None:
     windres = Path(a.llvm_mingw) / f"bin/x86_64-w64-mingw32-windres{exe}"
     subprocess.run([str(windres), "-O", "coff", "-I", str(ROOT / "assets"), str(ROOT / "assets/sanctum.rc"), "-o", str(res)],
                    check=True)
-    target = OUT / "SteelTemple-Sanctum.exe"
+    target = OUT / f"{a.name}.exe"
     link = [str(cxx), *objs, str(res), "-o", str(target), "-static", f"-L{sdl / 'lib'}", "-lSDL3", *LIBS]
     link.append("-mconsole" if a.debug else "-mwindows")
     subprocess.run(link, check=True)

@@ -39,9 +39,12 @@ void config_load() {
         else if (k == "follow") g_cfg.follow = v == "1";
         else if (k == "large_tiles") g_cfg.large_tiles = v == "1";
         else if (k == "sounds") g_cfg.sounds = v == "1";
-        else if (k == "show_dev") g_cfg.show_dev = v == "1";
+        else if (k == "hide_dev") g_cfg.hide_dev = v == "1";   // (the older show_dev=0 is left behind on purpose)
+        else if (k.rfind("prefer.", 0) == 0 && !v.empty()) g_cfg.prefer[k.substr(7)] = v;
         else if (k == "fullscreen") g_cfg.fullscreen = v == "1";
         else if (k == "hide_cursor") g_cfg.hide_cursor = v == "1";
+        else if (k == "pad_layout") g_cfg.pad_layout = v == "nintendo" ? 1 : v == "xbox" ? 2 : 0;
+        else if (k == "button_icons") g_cfg.button_icons = v == "nintendo" ? 1 : v == "xbox" ? 2 : v == "playstation" ? 3 : 0;
         else if (k == "cover_dir") g_cfg.cover_dir = v;
         else if (k == "library_dir") g_cfg.library_dir = v;
         else if (k == "profile" && !v.empty()) g_cfg.profile = v;
@@ -54,9 +57,13 @@ void config_save() {
     s += std::string("follow=") + (g_cfg.follow ? "1" : "0") + "\n";
     s += std::string("large_tiles=") + (g_cfg.large_tiles ? "1" : "0") + "\n";
     s += std::string("sounds=") + (g_cfg.sounds ? "1" : "0") + "\n";
-    s += std::string("show_dev=") + (g_cfg.show_dev ? "1" : "0") + "\n";
+    s += std::string("hide_dev=") + (g_cfg.hide_dev ? "1" : "0") + "\n";
+    for (auto &e : g_cfg.prefer) s += "prefer." + e.first + "=" + e.second + "\n";
     s += std::string("fullscreen=") + (g_cfg.fullscreen ? "1" : "0") + "\n";
     s += std::string("hide_cursor=") + (g_cfg.hide_cursor ? "1" : "0") + "\n";
+    static const char *const layouts[] = {"auto", "nintendo", "xbox"}, *const icons[] = {"auto", "nintendo", "xbox", "playstation"};
+    s += std::string("pad_layout=") + layouts[g_cfg.pad_layout % 3] + "\n";
+    s += std::string("button_icons=") + icons[g_cfg.button_icons % 4] + "\n";
     s += "cover_dir=" + g_cfg.cover_dir + "\n";
     s += "library_dir=" + g_cfg.library_dir + "\n";
     s += "profile=" + g_cfg.profile + "\n";

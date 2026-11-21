@@ -277,7 +277,7 @@ void news_frame() {
     case NAV_L: g_news = std::max(0, g_news - 6); break;
     case NAV_R: g_news = std::min(std::max(0, n - 1), g_news + 6); break;
     case NAV_A: if (n) { game_show_release(items[g_news].port, items[g_news].rel->tag); return; } break;
-    case NAV_PLUS: github_refresh(); toast("Asking GitHub for new releases"); break;
+    case NAV_PLUS: github_refresh(true); toast("Asking GitHub for new releases"); break;
     case NAV_B: go_back(); return;
     default: break;
     }
