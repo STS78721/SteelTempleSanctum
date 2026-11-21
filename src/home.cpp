@@ -186,7 +186,7 @@ void home_frame() {
     } else if (g_zone == Z_DOCK) {
         title = kDock[g_dock].label;
     } else {
-        title = cfg().profile, sub = "Change your icon";
+        title = cfg().profile, sub = "Your name and icon";
     }
     text(96, row_y - 54, 27, p.text, fit(27, title, 700).c_str());
     if (!sub.empty()) text(96 + text_w(27, fit(27, title, 700).c_str()) + 16, row_y - 46, 16, p.soft, fit(16, sub, 1100 - text_w(27, title.c_str())).c_str());

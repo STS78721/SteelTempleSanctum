@@ -216,6 +216,8 @@ int main(int, char **) {
             continue;
         }
         a.mouse_moved = a.clicked = false;
+        a.typed.clear();
+        a.key_back = a.key_enter = a.key_escape = false;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL3_ProcessEvent(&e);
@@ -235,6 +237,7 @@ int main(int, char **) {
         input_frame();
         if (frame >= 30 && (frame - 30) % 8 == 0 && (size_t)((frame - 30) / 8) < script.size())
             a.nav = script[(frame - 30) / 8];
+        if (a.nav == NAV_HOME && a.text_entry) { a.text_entry = false; SDL_StopTextInput(win); }   // typing ends unsaved
         if (a.nav == NAV_HOME) { a.back.clear(); a.screen = SCR_HOME; a.nav = NAV_NONE; }
         background_poll(win);
         covers_poll(a.now);

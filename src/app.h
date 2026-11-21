@@ -42,6 +42,11 @@ struct App {
     ImVec2 mouse;                // in canvas points
     PadStyle pad = PAD_KEYBOARD;
     std::string pad_name;        // the last pad used, for the hint bar
+    // text entry (the on-screen keyboard is open): typed text and editing keys from a physical keyboard, this frame;
+    // letter keys then type instead of moving or acting
+    bool text_entry = false;
+    std::string typed;
+    bool key_back = false, key_enter = false, key_escape = false;
 
     // selection kept across screens
     int game = 0;                // the port the game page shows

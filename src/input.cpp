@@ -149,9 +149,23 @@ void input_event(const SDL_Event &e) {
         if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) g_axis_y = e.gaxis.value / 32767.0f;
         if (std::fabs(e.gaxis.value) > 16000) use_pad(e.gaxis.which);
         break;
+    case SDL_EVENT_TEXT_INPUT:
+        if (a.text_entry) a.typed += e.text.text;
+        break;
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         bool down = e.type == SDL_EVENT_KEY_DOWN;
+        if (a.text_entry) {   // typing: only the arrows move; Backspace, Enter and Esc edit
+            if (down) a.pad = PAD_KEYBOARD;
+            Nav dir = e.key.key == SDLK_LEFT ? NAV_LEFT : e.key.key == SDLK_RIGHT ? NAV_RIGHT
+                    : e.key.key == SDLK_UP ? NAV_UP : e.key.key == SDLK_DOWN ? NAV_DOWN : NAV_NONE;
+            if (dir) { if (!e.key.repeat) hold(dir, down); break; }
+            if (!down) break;
+            if (e.key.key == SDLK_BACKSPACE) a.key_back = true;
+            if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER) a.key_enter = true;
+            if (e.key.key == SDLK_ESCAPE) a.key_escape = true;
+            break;
+        }
         if (down && !e.key.repeat) a.pad = PAD_KEYBOARD;
         Nav dir = NAV_NONE;
         switch (e.key.key) {

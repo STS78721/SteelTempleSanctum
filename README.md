@@ -96,11 +96,15 @@ work everywhere too.
 
 Pick your icon from 60 original designs in six sets (SteelTemple, Creatures, Food, Nature, Space and Play), then
 choose one of 16 background colours. The large icon on the left previews whatever you highlight, and **A** keeps it.
-Your icon then shows on Home and on every screen.
+Press **Y** to name your profile: an on-screen keyboard works with a controller, or you can type straight in on a
+keyboard. Your icon then shows on Home and on every screen, and your name shows on Home.
 
-<div align="center">
-<img src="docs/screenshots/profile.png" width="800" alt="Profile: choosing an icon from the Creatures set">
-</div>
+<table>
+<tr>
+<td><img src="docs/screenshots/profile.png" alt="Profile: choosing an icon from the Creatures set"></td>
+<td><img src="docs/screenshots/profile-name.png" alt="Naming the profile with the on-screen keyboard"></td>
+</tr>
+</table>
 
 ### 🖼️ Your cover art, on your tiles
 
