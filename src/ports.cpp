@@ -138,7 +138,7 @@ void ports_frame() {
     rect(96, sy, 1088, 76, p.panel2, 16);
     std::string s1 = count ? std::to_string(count) + (count == 1 ? " port selected" : " ports selected") : "Nothing selected yet";
     text(120, sy + 14, 19, p.text, s1.c_str());
-    std::string s2 = (count ? mb(total) + " to download  ·  " : std::string()) + "installs into " + library_dir() + "   (Y changes)";
+    std::string s2 = (count ? mb(total) + " to download  ·  " : std::string()) + "installs into " + shown_path(library_dir()) +"   (Y changes)";
     text(120, sy + 42, 14, p.soft, fit(14, s2, 760).c_str());
     float bw = 210, bx = 1184 - 16 - bw, by = sy + 12;
     if (hover(bx, by, bw, 52)) { if (a.mouse_moved) g_focus = n; if (a.clicked) start_downloads(); }

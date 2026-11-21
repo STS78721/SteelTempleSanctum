@@ -299,7 +299,7 @@ void game_frame() {
             rect(x, by - 4, 4, ch, c, 2);
             icon(lr->verdict == RUN_CLEAN ? IC_CHECK : IC_INFO, x + 24, by + 16, 18, c);
             text(x + 46, by + 5, 16, p.text, fit(16, head, 720).c_str());
-            if (!lr->detail.empty()) text(x + 46, by + 30, 13, p.soft, fit(13, lr->detail, 720).c_str());
+            if (!lr->detail.empty() && !demo_mode()) text(x + 46, by + 30, 13, p.soft, fit(13, lr->detail, 720).c_str());
             if (lr->verdict == RUN_NO_START)
                 text(x + 46, by + 30 + (lr->detail.empty() ? 0 : 20), 13, p.dim, "Its own launcher (Set up) can check the game files.");
             by += ch + 10;
@@ -312,13 +312,13 @@ void game_frame() {
             text(x, by + 28, 17, p.soft, "Download installs the latest release; its first start then asks for your own game files.");
         } else {
             text(x, by, 15, p.dim, port.installs.size() > 1 ? "Copies on this PC (Play starts the selected one)" : "On this PC");
-            int rows = std::max(1, (int)((640 - (by + 26)) / 50));
+            int rows = demo_mode() ? 1 : std::max(1, (int)((640 - (by + 26)) / 50));
             for (int i = 0; i < (int)port.installs.size() && i < rows; ++i) {
                 const Install &c = port.installs[i];
                 float y = by + 26 + i * 50;
                 rect(x, y, 780, 42, i == g_copy ? p.panel : with_alpha(p.panel, 120), 10);
                 if (i == g_copy) icon(IC_CHECK, x + 22, y + 21, 18, p.ok);
-                text(x + 44, y + 10, 16, p.text, fit(16, c.dir, 520).c_str());
+                text(x + 44, y + 10, 16, p.text, fit(16, shown_path(c.dir, port.title), 520).c_str());
                 std::string tag = (c.version.empty() ? std::string("version unknown") : c.version) +
                                   (c.registered ? "  ·  Setup Wizard" : "") + (c.dev ? "  ·  build folder" : "");
                 text(x + 768, y + 11, 14, p.dim, tag.c_str(), 1);

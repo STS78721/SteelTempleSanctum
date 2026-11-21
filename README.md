@@ -1,157 +1,168 @@
+<div align="center">
+
+<img src="assets/icon.png" width="128" alt="SteelTemple Sanctum icon">
+
 # SteelTemple Sanctum
 
-A console-style home for STS78721's PC ports: one row of your ports, their pages, and everything reachable with a
-controller. It finds the ports already on the PC so nothing is installed twice, and starts them directly.
+**One home for every SteelTemple PC port.**<br>
+A console-style launcher for Windows that you can drive entirely with a controller: browse your ports, download them,
+keep them up to date, change their settings, and start any game straight from the couch.
 
-**Build step 3** (this tree): the shell, Home, a port's page, System Settings (Display, Themes, Cover art, Ports on
-this PC, Controllers), the controller folder picker and tester, the search of this PC, cover art (watched live),
-launching, and now GitHub: every port's releases and notes, **Get ports** (tick the ports to download),
-**Downloads** (download, verify, install or update, in the background) and **Releases & news**; and each port
-started directly with its last run checked; and each port's own in-game settings, changed from Sanctum. Profiles and
-mods come next (see `../SteelTemple-Sanctum-Design/DESIGN.md`).
+[![Release](https://img.shields.io/github/v/release/STS78721/SteelTempleSanctum?include_prereleases&label=release&color=e8243a)](https://github.com/STS78721/SteelTempleSanctum/releases)
+![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078d4)
+![Controller first](https://img.shields.io/badge/controller-first-2bb3c0)
+![No game files](https://img.shields.io/badge/game%20files-never%20included-3a3a3a)
 
-## Using it
+[**Download**](https://github.com/STS78721/SteelTempleSanctum/releases) ·
+[Features](#features) · [Supported ports](#supported-ports) · [Controls](#controls) · [How it works](docs/TECHNICAL.md)
 
-| | Pad | Keyboard | Mouse |
-|---|---|---|---|
-| Move | D-pad / left stick (held: repeats) | arrows / WASD | hover |
-| Confirm | A (Cross) | Enter / Space | left click |
-| Back | B (Circle) | Esc / Backspace | right click |
-| Options / GitHub | X / Y | X / Tab | |
-| Tabs | L / R | Q / E | click a tab |
-| Check for ports (this PC and GitHub) | + (Menu, Options) | F5 | |
-| Home from anywhere | Home (Guide) | Home | |
-| Fullscreen (on by default) | System Settings > Display | F11, Alt+Enter | |
+<img src="docs/screenshots/home.png" width="900" alt="Sanctum's Home screen: a row of port tiles and round buttons below">
 
-As in the ports' F1 menus, **System Settings > Controllers** sets the **Button layout**: Automatic (A confirms where
-each pad prints it: right on Nintendo pads, at the bottom on others), Nintendo (A right, Switch style, on any pad) or
-Xbox (A bottom); and the **Button icons** the hints show: Automatic (the pad's own), Nintendo, Xbox or PlayStation.
-The hints always show the button that does it, where it sits, in the chosen icons.
+</div>
 
-## Cover art
+---
 
-Sanctum ships no game art. Pick your own folder of covers in **System Settings > Cover art** (the picker works with a
-controller); files are matched to ports by name (`Mario Kart World.png`, `The Legend of Zelda꞉ Ocarina of Time.png`,
-...). A port without a cover shows its colours and monogram.
+## Features
 
-## Getting and updating ports
+### 🏠 A home screen that feels like a console
 
-**Get ports** lists every released port. Tick the ones you want (A), choose Standalone or Setup Wizard where a release
-has both (X), and Download (+). **Downloads** shows each job's steps while you keep browsing:
+Your ports sit in one row, ordered by what you played last, each in its own colours. The round buttons below
+open News, Get ports, Downloads, Controllers, System Settings and Power. Sanctum opens fullscreen and hides the
+mouse pointer while you use a controller. Dark and Light themes are included, and Home can take on the colours of
+the port you select.
 
-1. *Download* from the port's GitHub release into `%LOCALAPPDATA%\SteelTemple\Sanctum\downloads` (resumes if stopped)
-2. *Verify* against the SHA-256 GitHub publishes for the file
-3. *Install*: a Standalone zip is unpacked with Windows' own `tar` and moved into the install folder
-   (`<home>\Games\SteelTemple\<port>` unless System Settings > Ports on this PC says otherwise); an **Update** zip is
-   laid over the copy in use: each replaced file becomes `*.old` first and is put back if anything fails; a Setup
-   Wizard runs as the port's own setup, then this PC is searched for it
-4. *Ready*: the copy joins the port's page. Ports that build their game on your PC (ShadowRacket, SlowSeparation,
-   ...) ship only their launcher: the page then says **Set up**, which opens the launcher for the first start with
-   your own game files; after that, **Play** starts the game directly.
+<div align="center">
+<img src="docs/screenshots/home-light.png" width="800" alt="Home in the Light theme">
+</div>
 
-Release lists are cached with their ETag, so starting Sanctum costs nothing against GitHub's hourly limit when
-nothing changed. No account or token is used, and nothing about the player is sent.
+### 🎮 Press Play and you're in the game
 
-## Playing
+**Play** starts the game itself and skips the port's own launcher. Sanctum steps aside while you play and comes back
+when you quit, on the game's page with a note on how the run went. If something went wrong, the log and the issue
+report are one button away. Sanctum also counts how long you've played each port.
 
-**Play** starts the game itself, the way the port's own launcher would, and never its start screen
-(`src/launch.cpp`, `kProfiles`):
+<div align="center">
+<img src="docs/screenshots/game.png" width="800" alt="A port's page: Play, version, the copy that will start">
+</div>
 
-| Port | Sanctum runs | Ready when |
+### 🔎 Finds the ports you already have
+
+At start, Sanctum looks through the Setup Wizards' entries and every drive for ports already on this PC, so nothing
+is installed twice. It reads each copy's real version from its game program. If you have more than one copy, you
+pick which one Play starts.
+
+### ⬇️ Get ports, update them, read what's new
+
+**Get ports** lists every released port: tick the ones you want and press Download. Downloads run in the background
+while you keep browsing. Each one is checked against the SHA-256 that GitHub publishes, and an update keeps a way
+back if it fails. Every port's release notes can be read on its own page, and **Releases & news** puts all of them in
+one list.
+
+<table>
+<tr>
+<td><img src="docs/screenshots/getports.png" alt="Get ports: every released port, ready to tick and download"></td>
+<td><img src="docs/screenshots/news.png" alt="Releases and news across every port"></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/screenshots/notes.png" alt="A port's release notes, read with a controller"></td>
+</tr>
+</table>
+
+### ⚙️ Each game's own settings, from the couch
+
+A port's **Settings** tab shows the same pages, options and values as the game's own in-game menu, in the port's
+colours. Changes go straight into the game's settings file, and its comments and layout stay as they are. **Y** puts
+any option back to the game's default.
+
+<table>
+<tr>
+<td><img src="docs/screenshots/game-settings.png" alt="A port's Settings tab"></td>
+<td><img src="docs/screenshots/port-settings.png" alt="A port's own settings pages inside Sanctum"></td>
+</tr>
+</table>
+
+### 🕹️ Any controller, your button layout
+
+Xbox, PlayStation, Switch Pro, Joy-Con and generic pads all work, and the on-screen hints show your pad's own
+buttons. Like the ports' F1 menus, **System Settings > Controllers** lets you choose the **Button layout**
+(Automatic, Nintendo with A on the right, or Xbox with A at the bottom) and the **Button icons**. Keyboard and mouse
+work everywhere too.
+
+<div align="center">
+<img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: Button layout and Button icons">
+</div>
+
+### 🖼️ Your cover art, on your tiles
+
+Sanctum ships no game art. Point **System Settings > Cover art** at your own folder of images, and each one is
+matched to its port by name (for example `Mario Kart World.png`). The tiles update by themselves when you add or
+change a picture. A port without a cover shows its colours and short name, as in the screenshots here.
+
+---
+
+## Supported ports
+
+| Game | Port | Repository |
 |---|---|---|
-| THWOMP | `mkw.exe --play` (`MKW_NO_LAUNCHER=1`) | `mkwgame.dll` is built |
-| MasterSword | `mastersword.exe <dir>\image.bin --romfs <dir>\romfs --user <dir>\user` | `image.bin` and `romfs\` are beside it |
-| TotK | `totk.exe` | `exefs\` and `romfs\` are beside it |
-| SlowSeparation / ShadowRacket | `ff.exe` / `mtf.exe` (`NS2_SHOW_LAUNCHER=0`) | the game is built |
-| DK BANANAS | `dkb.exe` (`NS2_SHOW_LAUNCHER=0`, `DKB_GPU_NAME`) | `exefs\main` and `romfs\romfs.bin` are there |
+| Mario Kart World | **MKW-THWOMP** | [STS78721/MKW-THWOMP](https://github.com/STS78721/MKW-THWOMP) |
+| The Legend of Zelda: Ocarina of Time | **MasterSword** | [STS78721/OOT-MASTERSWORD](https://github.com/STS78721/OOT-MASTERSWORD) |
+| The Legend of Zelda: Tears of the Kingdom | **TotK SteelTempleBuild** | [STS78721/totk-pc-recomp-SteelTempleBuild](https://github.com/STS78721/totk-pc-recomp-SteelTempleBuild) |
+| Fast Fusion | **SlowSeparation** | [STS78721/SlowSeparation](https://github.com/STS78721/SlowSeparation) |
+| Mario Tennis Fever | **ShadowRacket** | [STS78721/MTF-ShadowRacket](https://github.com/STS78721/MTF-ShadowRacket) |
+| Donkey Kong Bananza | **dkb-BANANAS** | [STS78721/dkb-BANANAS](https://github.com/STS78721/dkb-BANANAS) |
+| Super Mario Bros. Wonder | **WonderBloom** | [STS78721/SMBWONDERBLOOM](https://github.com/STS78721/SMBWONDERBLOOM) |
 
-Until a port is ready, the button says **Set up** and opens the port's own launcher for the first setup. While a
-game runs, Sanctum minimises and sleeps; its tile says *Playing*, and its page offers **Close game** (press twice).
-When it ends Sanctum comes back on its page with how the run went: THWOMP's own checker (`lastrun.py`, its known
-errors) when present, else the exit code and the last error in the game's log, with **Open the log** and
-**Report it** when it went wrong. Time played is kept per port (`playtime.ini`), and Home lists the ports played
-last first, like the console.
+New releases of these ports show up in Sanctum by themselves. Press **+** (Menu / Options) to check right away.
 
-## Game settings
+## Getting started
 
-A port's page has a **Settings** tab: its own in-game settings, the same pages, rows, words and values as the game's
-menu, in the port's colours. A or left/right changes a value, Y puts it back to the game's default, L/R change page.
-Sanctum writes the port's own ini beside its game (`mkw.ini`, `totk.ini`, `ff.ini`, `mtf.ini`, `dkb.ini`) the way the
-game does: only the changed line, keeping comments, order and line endings, a new key under its section; the first
-change of a visit saves `<ini>.sanctum-bak`. A setting the environment fixes is shown greyed; while the game runs the
-page is read-only. MasterSword's settings stay in its own launcher (its menu is built differently).
+1. Download the latest Sanctum from [**Releases**](https://github.com/STS78721/SteelTempleSanctum/releases) and
+   unzip it anywhere.
+2. Start `SteelTemple-Sanctum.exe`. Ports you already have appear on Home within a few seconds.
+3. Open **Get ports** to download more. A port that builds its game from your files asks for them on its first
+   start, through **Set up** on its page.
 
-The lists are `assets/settings/<port>.json`, read from each port's source by `tools/extract_settings.py`
-(`cfg.c` `metas[]` and `sections[]`, the menu's `tab_*()` rows, the English text); each names the commit it came
-from. The source paths are your own, in `tools/settings_sources.local.json` (never committed):
+> [!IMPORTANT]
+> Sanctum and the ports never include or download game files. Every port runs from **your own** legally dumped copy
+> of the game.
 
-```sh
-python tools/extract_settings.py            # every port
-python tools/extract_settings.py totk       # one
-```
+## Controls
 
-## Ports on this PC
+| | Controller | Keyboard | Mouse |
+|---|---|---|---|
+| Move | D-pad / left stick | Arrows / WASD | Hover |
+| Confirm | A | Enter / Space | Left click |
+| Back | B | Esc / Backspace | Right click |
+| Options / GitHub | X / Y | X / Tab | |
+| Switch tabs or pages | L / R | Q / E | Click a tab |
+| Check for ports | + (Menu / Options) | F5 | |
+| Back to Home | Home (Guide) | Home | |
+| Fullscreen | System Settings > Display | F11 or Alt+Enter | |
 
-At start the list from the last search shows at once; a new search runs in the background: the Setup Wizards'
-entries in Windows' apps list, then every fixed drive, six folders deep, for each port's program (`mkw.exe` with
-`mkwgame.id`, `mastersword.exe`, `totk.exe`, `ff.exe`, `mtf.exe`, `dkb.exe`, or the port's own launcher alone), plus Sanctum's
-own install folder. A copy found before and still there is never dropped. Each copy's version is read from its
-game program, which carries its release tag (`0.2.2c`, `Alpha 0.1.3b`, `Beta 6.3`): truer than a Setup Wizard's
-registry entry or a VERSION file, which go stale when a copy is updated another way. Read once per program on a
-worker, the copies in use first, and kept in `versions.ini`. Every copy is kept; the best (Setup
-Wizard, then one with its launcher, then the newest version) is the one Play starts, and the game page lets you
-pick another, which is then remembered ("Use this copy"). Copies inside build, staging or backup folders are shown
-too, ranked last; **System Settings > Ports on this PC** can leave them out.
+## Your privacy
 
-## Where things are
+- No account, sign-in or token. Sanctum only reads the public release lists from GitHub, and caches them so it
+  rarely needs to ask.
+- Nothing about you or your PC is sent anywhere.
+- Your settings, play time and cover-art choice stay in your own Windows profile. Nothing is written into the ports'
+  downloads or releases.
 
-| | |
-|---|---|
-| `%APPDATA%\SteelTemple\Sanctum\settings.ini` | the player's settings (theme, cover folder, ...) |
-| `%APPDATA%\SteelTemple\Sanctum\library.ini` | the ports found by the last search |
-| `%APPDATA%\SteelTemple\Sanctum\playtime.ini` | time played from Sanctum, per port |
-| `%LOCALAPPDATA%\SteelTemple\Sanctum\releases\` | each port's GitHub release list and its ETag |
-| `%LOCALAPPDATA%\SteelTemple\Sanctum\downloads\` | packages while downloading (removed once installed) |
+## Building from source
 
-Nothing personal is ever written next to the program or packaged.
-
-## Building
-
-Needs llvm-mingw and a static SDL3 3.4 (`-DSDL_STATIC=ON`, a prefix with `include/SDL3` and `lib/libSDL3.a`).
+Sanctum is C++20 with SDL3 and Dear ImGui. It builds to a single exe of about 6 MB with no DLLs to install.
 
 ```sh
 python tools/build.py --llvm-mingw <llvm-mingw folder> --sdl <SDL3 static prefix>
 ```
 
-`build/SteelTemple-Sanctum.exe` (about 6 MB, no DLLs) and `build/assets/`.
+[docs/TECHNICAL.md](docs/TECHNICAL.md) covers how ports are found, downloaded, started and configured, where Sanctum
+keeps its files, the test hooks, and a map of the source.
 
-Test hooks: `SANCTUM_NAV="R R A"` (presses from frame 30, one per 8 frames), `SANCTUM_SHOT=<file.bmp>` with
-`SANCTUM_SHOT_FRAME=<n>` (saves that frame and quits; with `SANCTUM_SHOT_IDLE=1` the first frame from then on with
-the downloads finished), `SANCTUM_THEME=light`, `SANCTUM_WINDOWED=1`, `SANCTUM_LIBRARY=<dir>` (install there this run), `SANCTUM_FOCUS=<port id>` (start on that port: tests never
-count tiles, since the row's order follows what was played last), `SANCTUM_LOG=<file>` (a debug log: the version
-reads, ...). `tools/build.py --name <name>` builds a copy under another name while Sanctum is running.
+## Credits
 
-| File | What it is |
-|---|---|
-| `src/main.cpp` | window, frame loop, screens, test hooks |
-| `src/app.h` | the shared state, screen list, canvas helpers |
-| `src/input.cpp` | pads, keyboard and mouse into one Nav per frame, with console-style repeat |
-| `src/draw.cpp` | text, shapes, button glyphs per pad, icons, tiles, focus ring, status and hint bars |
-| `src/home.cpp` | Home: profile, the row of ports, the round buttons, Power |
-| `src/game.cpp` | a port's page: Play / Download, its launcher, GitHub, tabs, the copies on this PC |
-| `src/settings.cpp` | System Settings, the folder picker, Controllers, pages to come |
-| `src/ports.cpp` | Get ports, Downloads, Releases & news |
-| `src/install.cpp` | the downloads queue: download, verify, unpack, install, update, Setup Wizards |
-| `src/github.cpp` | each port's releases from GitHub, cached with ETags |
-| `src/net.cpp` | HTTPS (WinHTTP), resumable downloads, SHA-256 (BCrypt) |
-| `src/json.cpp` | a small JSON reader |
-| `src/catalog.cpp` | the ports, the search of this PC, library.ini |
-| `src/covers.cpp` | cover art from the player's folder, decoded on a worker thread |
-| `src/launch.cpp` | starting a port and coming back when it ends |
-| `src/port_settings.cpp` | a port's own settings page, and the ini editor that keeps the file as it is |
-| `tools/extract_settings.py` | each port's settings list from its source tree, into `assets/settings/` |
-| `src/theme.h` | Dark and Light (the ports' universal themes) |
-| `third_party/` | Dear ImGui 1.91.9 (MIT), stb_image (public domain / MIT) |
-| `assets/fonts/` | Roboto Medium (Apache 2.0) |
-| `assets/sanctum.ico`, `icon.png` | Sanctum's icon, drawn by `tools/make_icon.py` (no game art) |
-| `assets/sanctum.rc`, `.manifest` | the exe's icon, version and manifest (per-monitor DPI, UTF-8) |
+Built by **SteelTemple**. It uses [SDL3](https://libsdl.org) (zlib),
+[Dear ImGui](https://github.com/ocornut/imgui) (MIT), [stb_image](https://github.com/nothings/stb) (public domain /
+MIT) and [Roboto](https://fonts.google.com/specimen/Roboto) (Apache 2.0).
+
+<sub>SteelTemple Sanctum is an unofficial fan project. It is not affiliated with or endorsed by Nintendo. All game
+titles are trademarks of their respective owners.</sub>

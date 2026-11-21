@@ -84,6 +84,24 @@ static std::string find_root(const std::string &root, const Port &p, int depth) 
     return {};
 }
 
+// a zipped Setup Wizard (WonderBloom's "...-Setup-Wizard.zip"): the setup program inside it
+static std::string find_setup_exe(const std::string &root, int depth) {
+    for (auto &n : list(root)) {
+        std::string l;
+        for (char c : n) l += (char)SDL_tolower((unsigned char)c);
+        if (l.size() > 4 && !l.compare(l.size() - 4, 4, ".exe") &&
+            (l.find("setup") != std::string::npos || l.find("installer") != std::string::npos))
+            return root + "\\" + n;
+    }
+    if (depth > 0)
+        for (auto &n : list(root))
+            if (is_dir(root + "\\" + n)) {
+                std::string r = find_setup_exe(root + "\\" + n, depth - 1);
+                if (!r.empty()) return r;
+            }
+    return {};
+}
+
 static long long free_bytes(const std::string &dir) {
     std::string d = dir;
     while (!d.empty() && !is_dir(d)) d = d.substr(0, d.find_last_of('\\') == std::string::npos ? 0 : d.find_last_of('\\'));
@@ -209,15 +227,34 @@ static void run(Job &j) {
 
     // ---- Setup Wizard: the port's own setup does the rest
     if (j.v.kind == JOB_WIZARD) {
+        std::string setup = file, unpacked;
+        if (setup.size() > 4 && !SDL_strcasecmp(setup.c_str() + setup.size() - 4, ".zip")) {   // a zipped setup
+            unpacked = dl_dir + "setup-" + port.id + "-" + std::to_string(j.v.id);
+            remove_tree(unpacked);
+            SDL_CreateDirectory(unpacked.c_str());
+            err = unzip(file, unpacked, j.cancel);
+            setup = err.empty() ? find_setup_exe(unpacked, 2) : "";
+            if (setup.empty()) {
+                remove_tree(unpacked);
+                set_phase(j, j.cancel ? PH_CANCELLED : PH_FAILED, err.empty() ? "no setup program in the download" : err);
+                return;
+            }
+        }
         set_phase(j, PH_WIZARD);
         g_wizard_open = true;
-        const char *args[] = {file.c_str(), nullptr};
+        const char *args[] = {setup.c_str(), nullptr};
         SDL_Process *p = SDL_CreateProcess(args, false);
-        if (!p) { g_wizard_open = false; set_phase(j, PH_FAILED, std::string("cannot start the setup: ") + SDL_GetError()); return; }
+        if (!p) {
+            g_wizard_open = false;
+            if (!unpacked.empty()) remove_tree(unpacked);
+            set_phase(j, PH_FAILED, std::string("cannot start the setup: ") + SDL_GetError());
+            return;
+        }
         int code = 0;
         SDL_WaitProcess(p, true, &code);
         SDL_DestroyProcess(p);
         g_wizard_open = false;
+        if (!unpacked.empty()) remove_tree(unpacked);
         std::lock_guard<std::mutex> l(g_lock);
         g_finished.push_back({j.v.port, JOB_WIZARD, {}, j.rel.tag});
         j.v.phase = PH_DONE;

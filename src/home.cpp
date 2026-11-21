@@ -220,7 +220,7 @@ void home_frame() {
     }
     dl()->PopClipRect();
 
-    if (cfg().cover_dir.empty() && g_zone == Z_ROW && fp)
+    if (cfg().cover_dir.empty() && !demo_mode() && g_zone == Z_ROW && fp)
         text(96, row_y + size + 30, 15, p.dim, "Your own cover art goes on these tiles: System Settings > Cover art.");
 
     // the round buttons

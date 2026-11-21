@@ -34,7 +34,7 @@ static AssetKind kind_of(const std::string &name) {
     bool exe = n.size() > 4 && n.compare(n.size() - 4, 4, ".exe") == 0;
     if (zip && (has("portable") || has("standalone"))) return ASSET_PORTABLE;
     if (zip && has("update")) return ASSET_UPDATE;
-    if (exe && (has("setup") || has("installer"))) return ASSET_WIZARD;
+    if ((exe || zip) && (has("setup") || has("installer"))) return ASSET_WIZARD;   // WonderBloom zips its setup
     return ASSET_OTHER;
 }
 
@@ -79,12 +79,21 @@ static int worker(void *) {
     // GitHub allows 60 questions an hour without an account, and an "unchanged" answer counts too: asked at most
     // every 15 minutes (the + button asks at once)
     long long last = atoll(load(dir + "last-check").c_str()), now = (long long)time(nullptr);
-    if (!g_force && now - last < 15 * 60) { g_busy = false; return 0; }
+    // a port new to this Sanctum (none of its releases saved yet) is asked for at once, whatever the wait
+    bool recent = !g_force && now - last < 15 * 60;
+    if (recent) {
+        bool fresh_port = false;
+        for (auto &p : ps) fresh_port |= !SDL_GetPathInfo((dir + p.id + ".json").c_str(), nullptr);
+        if (!fresh_port) { g_busy = false; return 0; }
+    }
     g_force = false;
-    std::string stamp = std::to_string(now);
-    SDL_SaveFile((dir + "last-check").c_str(), stamp.data(), stamp.size());
+    if (!recent) {
+        std::string stamp = std::to_string(now);
+        SDL_SaveFile((dir + "last-check").c_str(), stamp.data(), stamp.size());
+    }
     for (int i = 0; i < (int)ps.size(); ++i) {
         std::string base = dir + ps[i].id;
+        if (recent && SDL_GetPathInfo((base + ".json").c_str(), nullptr)) continue;   // only the new ones
         HttpResult r = http_get(std::string("https://api.github.com/repos/") + ps[i].repo + "/releases?per_page=12",
                                 load(base + ".etag"));
         if (r.status == 304) continue;

@@ -59,6 +59,10 @@ void toast(const std::string &text, double seconds = 2.6);
 void set_fullscreen(bool on);    // applies and remembers it (Settings > Display, F11, Alt+Enter)
 // a line in the file SANCTUM_LOG names (debugging; nothing is written without it). Safe from any thread.
 void sanctum_log(const char *fmt, ...);
+// SANCTUM_DEMO=1: screenshots for the README. No folders of this PC on screen, no cover art, nothing saved,
+// no game started.
+bool demo_mode();
+std::string shown_path(const std::string &real, const char *port_title = nullptr);
 
 // canvas -> window
 inline ImVec2 P(float x, float y) { App &a = app(); return ImVec2(a.ox + x * a.scale, a.oy + y * a.scale); }

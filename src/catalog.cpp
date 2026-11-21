@@ -37,6 +37,10 @@ static std::vector<Port> g_ports = {
     {"dkb-bananas", "Donkey Kong Bananza", "dkb-BANANAS", "STS78721/dkb-BANANAS", "Alpha-1g", "321 MB",
      "donkeykongbananza", "DKB", "dkb.exe", nullptr, "DKBLauncher.exe", nullptr,
      {IM_COL32(242, 181, 28, 255), IM_COL32(90, 50, 16, 255)}},
+    // WonderBloom: the start screen is inside smbw.exe (no separate launcher program); its setup is the release zip
+    {"wonderbloom", "Super Mario Bros. Wonder", "WonderBloom", "STS78721/SMBWONDERBLOOM", "0.1.0a", "143 MB",
+     "supermariobroswonder", "SMBW", "smbw.exe", nullptr, nullptr, nullptr,
+     {IM_COL32(156, 72, 232, 255), IM_COL32(38, 16, 72, 255)}},
 };
 
 std::vector<Port> &ports() { return g_ports; }

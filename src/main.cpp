@@ -98,6 +98,17 @@ static void background_poll(SDL_Window *win) {
     version_probe_poll();
 }
 
+bool demo_mode() {
+    static const bool on = getenv("SANCTUM_DEMO") != nullptr;
+    return on;
+}
+
+// a folder as the screen shows it: in demo mode a stand-in, so screenshots never show this PC's folders
+std::string shown_path(const std::string &real, const char *port_title) {
+    if (!demo_mode()) return real;
+    return port_title ? std::string("D:\\Games\\") + port_title : std::string("D:\\Games\\SteelTemple");
+}
+
 static Nav nav_of(const std::string &t) {
     static const struct { const char *s; Nav n; } k[] = {
         {"L", NAV_LEFT}, {"R", NAV_RIGHT}, {"U", NAV_UP}, {"D", NAV_DOWN}, {"A", NAV_A}, {"B", NAV_B}, {"X", NAV_X},

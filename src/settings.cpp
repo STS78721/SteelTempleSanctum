@@ -35,7 +35,7 @@ static std::vector<Row> rows_of(int cat) {
         r.push_back({"Hide the mouse pointer while using a controller", "", R_HIDE_CURSOR, true, c.hide_cursor});
         SDL_DisplayID d = SDL_GetDisplayForWindow(app().window);
         const SDL_DisplayMode *m = d ? SDL_GetDesktopDisplayMode(d) : nullptr;
-        const char *name = d ? SDL_GetDisplayName(d) : nullptr;
+        const char *name = d && !demo_mode() ? SDL_GetDisplayName(d) : nullptr;
         if (m) r.push_back({"Screen", std::string(name ? name : "Display") + "  ·  " + std::to_string(m->w) + " x " +
                                           std::to_string(m->h) + "  ·  " + std::to_string((int)(m->refresh_rate + 0.5f)) + " Hz", R_INFO});
         r.push_back({"Shortcut", "F11 or Alt+Enter switches fullscreen at any time", R_INFO});
@@ -53,12 +53,13 @@ static std::vector<Row> rows_of(int cat) {
         break;
     case CAT_LIBRARY:
         r.push_back({scan_running() ? "Searching this PC..." : "Search this PC again", "", R_SEARCH});
-        r.push_back({"Install new ports into", library_dir(), R_LIBDIR});
+        r.push_back({"Install new ports into", shown_path(library_dir()), R_LIBDIR});
         r.push_back({"Include copies in build and backup folders", "", R_DEV, true, !c.hide_dev});
         for (auto &p : ports()) {
+            std::string dir = p.installs.empty() ? "" : shown_path(p.installs[0].dir, p.title);
             std::string v = p.installs.empty() ? (p.hidden ? "Only in build folders" : "Not found")
-                          : p.installs.size() == 1 ? p.installs[0].dir
-                          : std::to_string(p.installs.size()) + " copies, using " + p.installs[0].dir;
+                          : p.installs.size() == 1 || demo_mode() ? dir
+                          : std::to_string(p.installs.size()) + " copies, using " + dir;
             r.push_back({p.title, v, R_PORT});
         }
         break;
@@ -72,8 +73,8 @@ static std::vector<Row> rows_of(int cat) {
         break;
     }
     case CAT_ABOUT:
-        r.push_back({"SteelTemple Sanctum", "Build step 1", R_INFO});
-        r.push_back({"Settings folder", config_dir(), R_INFO});
+        r.push_back({"SteelTemple Sanctum", "Version 0.3.0", R_INFO});
+        r.push_back({"Settings folder", demo_mode() ? "%APPDATA%\\SteelTemple\\Sanctum" : config_dir(), R_INFO});
         r.push_back({"Game files", "Never downloaded or shipped: every port uses your own copy", R_INFO});
         break;
     }

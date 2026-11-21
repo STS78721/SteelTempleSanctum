@@ -44,6 +44,7 @@ static const Profile kProfiles[] = {
     {"shadowracket", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"mtf.exe"}, {}, "logs\\mtf.log", nullptr},
     // DKB: dkb.exe with the player's exefs and packed romfs (DKBLauncher.py launch_game)
     {"dkb-bananas", {}, {"DKB_GPU_NAME={gpu}", "!NS2_SHOW_LAUNCHER=0"}, {"dkb.exe", "exefs\\main", "romfs\\romfs.bin"}, {}, "logs\\dkb.log", nullptr},
+    {"wonderbloom", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"smbw.exe"}, {}, "logs\\smbw.log", nullptr},
 };
 
 static const Profile *profile_of(const Port &p) {
@@ -108,6 +109,7 @@ static std::vector<std::pair<int, LastRun>> g_judged;
 
 bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     if (g_proc) { toast("A game is already running"); return false; }
+    if (demo_mode()) { toast("Demo mode: games don't start"); return false; }
     const Port &p = ports()[port_i];
     const Profile *pr = profile_of(p);
     bool play = !own_launcher && can_play(p, in);

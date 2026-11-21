@@ -321,7 +321,7 @@ void port_settings_frame() {
     tile(port, 58, 84, 52, 1, false);
     text(124, 86, 14, acc, (std::string("STEELTEMPLE  ") + port.name).c_str());
     text(124, 104, 24, p.text, "Game settings");
-    std::string where = g_has_ini ? g_ini.path : "No " + s->ini + " yet: the first change creates it";
+    std::string where = g_has_ini ? shown_path(g_ini.path, demo_mode() ? (port.title + std::string("\\") + s->ini).c_str() : nullptr) :"No " + s->ini + " yet: the first change creates it";
     text(1236, 108, 13, p.dim, fit(13, where, 640).c_str(), 1);
 
     // the pages

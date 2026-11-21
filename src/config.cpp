@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "app.h"
+
 namespace sanctum {
 
 static Config g_cfg;
@@ -49,9 +51,11 @@ void config_load() {
         else if (k == "library_dir") g_cfg.library_dir = v;
         else if (k == "profile" && !v.empty()) g_cfg.profile = v;
     }
+    if (demo_mode()) g_cfg.cover_dir.clear(), g_cfg.library_dir.clear();   // README screenshots: no cover art
 }
 
 void config_save() {
+    if (demo_mode()) return;   // screenshots never touch the player's settings
     std::string s = "# SteelTemple Sanctum: this player's settings\n";
     s += std::string("theme=") + (g_cfg.theme ? "light" : "dark") + "\n";
     s += std::string("follow=") + (g_cfg.follow ? "1" : "0") + "\n";
