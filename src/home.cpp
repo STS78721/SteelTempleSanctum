@@ -105,7 +105,7 @@ void home_frame() {
         case NAV_UP: if (g_zone > Z_PROFILE) g_zone--; break;
         case NAV_DOWN: if (g_zone < Z_DOCK) g_zone++; break;
         case NAV_A:
-            if (g_zone == Z_PROFILE) { a.soon_title = "Profiles"; go(SCR_SOON); }
+            if (g_zone == Z_PROFILE) profile_open();
             if (g_zone == Z_ROW) {
                 if (a.game < (int)ps.size() && (!ps[a.game].installs.empty() || install_queued(a.game))) go(SCR_GAME);
                 else if (a.game < (int)ps.size()) get_ports_select(a.game);   // not on this PC: straight to getting it
@@ -139,7 +139,7 @@ void home_frame() {
     if (!g_power) {
         if (hover(52, 23, 46, 46) && (a.mouse_moved || a.clicked)) {
             g_zone = Z_PROFILE;
-            if (a.clicked) { a.soon_title = "Profiles"; go(SCR_SOON); }
+            if (a.clicked) profile_open();
         }
         for (int i = 0; i < n; ++i) {
             float x = 96 + i * (size + gap) - g_scroll;
@@ -186,7 +186,7 @@ void home_frame() {
     } else if (g_zone == Z_DOCK) {
         title = kDock[g_dock].label;
     } else {
-        title = cfg().profile, sub = "Profiles";
+        title = cfg().profile, sub = "Change your icon";
     }
     text(96, row_y - 54, 27, p.text, fit(27, title, 700).c_str());
     if (!sub.empty()) text(96 + text_w(27, fit(27, title, 700).c_str()) + 16, row_y - 46, 16, p.soft, fit(16, sub, 1100 - text_w(27, title.c_str())).c_str());

@@ -18,7 +18,7 @@ enum Nav { NAV_NONE, NAV_LEFT, NAV_RIGHT, NAV_UP, NAV_DOWN, NAV_A, NAV_B, NAV_X,
 // What the connected pad's face buttons look like, for the button hints.
 enum PadStyle { PAD_KEYBOARD, PAD_XBOX, PAD_NINTENDO, PAD_PLAYSTATION, PAD_GENERIC };
 
-enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS };
+enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE };
 enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY };
 
 struct Toast {
@@ -81,6 +81,8 @@ void ports_frame();       // Get ports
 void downloads_frame();   // the downloads queue
 void news_frame();        // Releases & news
 void port_settings_frame();   // a port's own settings (port_settings.cpp)
+void profile_open();          // the player's profile: icon and colour (profile.cpp)
+void profile_frame();
 
 // the controller folder picker; X sets the cover-art folder or the folder new ports install into
 void folder_open(const std::string &start, FolderFor what = FOLDER_COVERS);

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <ctime>
 
+#include "avatars.h"
 #include "config.h"
 #include "covers.h"
 #include "input.h"
@@ -163,12 +164,7 @@ void hint_bar(std::initializer_list<std::pair<Nav, const char *>> hints) {
 
 void status_bar(bool show_profile) {
     const Palette &p = pal();
-    if (show_profile) {
-        circle(67, 46, 23, p.accent);
-        std::string ini = cfg().profile.empty() ? "?" : cfg().profile.substr(0, 1);
-        if (cfg().profile.rfind("Player ", 0) == 0) ini = "P" + cfg().profile.substr(7, 1);
-        text(67, 33, 21, IM_COL32_WHITE, ini.c_str(), 0.5f);
-    }
+    if (show_profile) avatar_draw_player(67, 46, 23);
     // right: search status, battery, clock
     time_t t = time(nullptr);
     struct tm lt;

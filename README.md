@@ -92,6 +92,16 @@ work everywhere too.
 <img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: Button layout and Button icons">
 </div>
 
+### 👤 Your profile icon
+
+Pick your icon from 60 original designs in six sets (SteelTemple, Creatures, Food, Nature, Space and Play), then
+choose one of 16 background colours. The large icon on the left previews whatever you highlight, and **A** keeps it.
+Your icon then shows on Home and on every screen.
+
+<div align="center">
+<img src="docs/screenshots/profile.png" width="800" alt="Profile: choosing an icon from the Creatures set">
+</div>
+
 ### 🖼️ Your cover art, on your tiles
 
 Sanctum ships no game art. Point **System Settings > Cover art** at your own folder of images, and each one is

@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "app.h"
@@ -50,6 +51,8 @@ void config_load() {
         else if (k == "cover_dir") g_cfg.cover_dir = v;
         else if (k == "library_dir") g_cfg.library_dir = v;
         else if (k == "profile" && !v.empty()) g_cfg.profile = v;
+        else if (k == "avatar" && !v.empty()) g_cfg.avatar = v;
+        else if (k == "avatar_bg") g_cfg.avatar_bg = SDL_clamp(atoi(v.c_str()), 0, 15);
     }
     if (demo_mode()) g_cfg.cover_dir.clear(), g_cfg.library_dir.clear();   // README screenshots: no cover art
 }
@@ -71,6 +74,8 @@ void config_save() {
     s += "cover_dir=" + g_cfg.cover_dir + "\n";
     s += "library_dir=" + g_cfg.library_dir + "\n";
     s += "profile=" + g_cfg.profile + "\n";
+    s += "avatar=" + g_cfg.avatar + "\n";
+    s += "avatar_bg=" + std::to_string(g_cfg.avatar_bg) + "\n";
     std::string tmp = path() + ".tmp";
     if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), path().c_str());
 }

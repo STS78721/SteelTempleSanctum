@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "app.h"
+#include "avatars.h"
 #include "catalog.h"
 #include "config.h"
 #include "covers.h"
@@ -180,6 +181,7 @@ int main(int, char **) {
     scan_start();
     github_refresh();
     covers_init(ren);
+    avatars_init(ren);
 
     // the test script
     std::vector<Nav> script;
@@ -259,6 +261,7 @@ int main(int, char **) {
         case SCR_DOWNLOADS: downloads_frame(); break;
         case SCR_NEWS: news_frame(); break;
         case SCR_PORT_SETTINGS: port_settings_frame(); break;
+        case SCR_PROFILE: profile_frame(); break;
         }
         if (starting) {
             const Palette &p = pal();

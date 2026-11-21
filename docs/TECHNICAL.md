@@ -101,7 +101,7 @@ too, ranked last; **System Settings > Ports on this PC** can leave them out.
 
 | | |
 |---|---|
-| `%APPDATA%\SteelTemple\Sanctum\settings.ini` | the player's settings (theme, cover folder, ...) |
+| `%APPDATA%\SteelTemple\Sanctum\settings.ini` | the player's settings (theme, cover folder, profile icon, ...) |
 | `%APPDATA%\SteelTemple\Sanctum\library.ini` | the ports found by the last search |
 | `%APPDATA%\SteelTemple\Sanctum\playtime.ini` | time played from Sanctum, per port |
 | `%LOCALAPPDATA%\SteelTemple\Sanctum\releases\` | each port's GitHub release list and its ETag |
@@ -140,6 +140,8 @@ no game started; the README screenshots are taken this way). `tools/build.py --n
 | `src/github.cpp` | each port's releases from GitHub, cached with ETags |
 | `src/net.cpp` | HTTPS (WinHTTP), resumable downloads, SHA-256 (BCrypt) |
 | `src/json.cpp` | a small JSON reader |
+| `src/profile.cpp` | Profile: the icon picker (by set) and the background colour |
+| `src/avatars.cpp` | the profile icons: the atlas, the 16 colours, drawing an icon on its colour |
 | `src/catalog.cpp` | the ports, the search of this PC, library.ini |
 | `src/covers.cpp` | cover art from the player's folder, decoded on a worker thread |
 | `src/launch.cpp` | starting a port and coming back when it ends |
@@ -148,5 +150,6 @@ no game started; the README screenshots are taken this way). `tools/build.py --n
 | `src/theme.h` | Dark and Light (the ports' universal themes) |
 | `third_party/` | Dear ImGui 1.91.9 (MIT), stb_image (public domain / MIT) |
 | `assets/fonts/` | Roboto Medium (Apache 2.0) |
+| `assets/avatars.png`, `avatars.txt` | the 60 profile icons, drawn by `tools/make_avatars.py` from shapes (original art; `--sheet <png>` draws them all on sample colours) |
 | `assets/sanctum.ico`, `icon.png` | Sanctum's icon, drawn by `tools/make_icon.py` (no game art) |
 | `assets/sanctum.rc`, `.manifest` | the exe's icon, version and manifest (per-monitor DPI, UTF-8) |
