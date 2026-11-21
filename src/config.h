@@ -11,6 +11,7 @@ struct Config {
     bool follow = true;           // the focused port tints Home
     bool large_tiles = true;
     bool sounds = true;
+    int sound_volume = 1;         // 0 low, 1 medium, 2 high
     bool hide_dev = false;        // leave out copies inside build / staging / backup folders (they rank last anyway)
     std::map<std::string, std::string> prefer;   // port id -> the copy the player chose ("Use this copy")
     bool fullscreen = true;       // starts fullscreen, like a console

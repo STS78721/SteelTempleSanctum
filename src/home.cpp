@@ -9,6 +9,7 @@
 #include "github.h"
 #include "install.h"
 #include "launch.h"
+#include "sound.h"
 
 namespace sanctum {
 
@@ -41,6 +42,7 @@ static void open_dock(int i) {
     case 5: go(SCR_SETTINGS); break;
     case 6:   // the press that opens the menu must not also pick in it
         g_power = true, g_power_sel = 1;   // Cancel is the safe default
+        sound_play(SFX_OK);
         app().nav = NAV_NONE, app().clicked = false;
         break;
     }
@@ -50,12 +52,18 @@ static void power_frame() {
     App &a = app();
     const Palette &p = pal();
     const char *items[] = {install_busy() ? "Close Sanctum (stops the downloads)" : "Close SteelTemple Sanctum", "Cancel"};
-    if (a.nav == NAV_UP || a.nav == NAV_DOWN) g_power_sel ^= 1;
+    if (a.nav == NAV_UP || a.nav == NAV_DOWN) { g_power_sel ^= 1; sound_play(SFX_MOVE); }
     for (int i = 0; i < 2; ++i)
-        if (a.mouse_moved && hover(470, 330 + i * 64, 340, 54)) g_power_sel = i;
+        if (a.mouse_moved && !a.clicked && hover(470, 330 + i * 64, 340, 54) && g_power_sel != i) {
+            g_power_sel = i;
+            sound_play(SFX_MOVE);
+        }
     bool pick = a.nav == NAV_A || (a.clicked && hover(470, 330 + g_power_sel * 64, 340, 54));
-    if (pick && g_power_sel == 0) a.quit = true;
-    if ((pick && g_power_sel == 1) || a.nav == NAV_B || (a.clicked && !hover(430, 240, 420, 250))) g_power = false;
+    if (pick && g_power_sel == 0) { sound_play(SFX_BACK); a.quit = true; }
+    if ((pick && g_power_sel == 1) || a.nav == NAV_B || (a.clicked && !hover(430, 240, 420, 250))) {
+        sound_play(SFX_BACK);
+        g_power = false;
+    }
     a.nav = NAV_NONE;
     a.clicked = false;
 
@@ -95,15 +103,31 @@ void home_frame() {
         // ---- input
         switch (a.nav) {
         case NAV_LEFT:
-            if (g_zone == Z_ROW && pos > 0) a.game = order[--pos];
-            if (g_zone == Z_DOCK && g_dock > 0) g_dock--;
+            if (g_zone == Z_ROW) {
+                if (pos > 0) { a.game = order[--pos]; sound_play(SFX_MOVE); }
+                else sound_play(SFX_EDGE);
+            } else if (g_zone == Z_DOCK) {
+                if (g_dock > 0) { g_dock--; sound_play(SFX_MOVE); }
+                else sound_play(SFX_EDGE);
+            }
             break;
         case NAV_RIGHT:
-            if (g_zone == Z_ROW && pos < n - 1) a.game = order[++pos];
-            if (g_zone == Z_DOCK && g_dock < kDockN - 1) g_dock++;
+            if (g_zone == Z_ROW) {
+                if (pos < n - 1) { a.game = order[++pos]; sound_play(SFX_MOVE); }
+                else sound_play(SFX_EDGE);
+            } else if (g_zone == Z_DOCK) {
+                if (g_dock < kDockN - 1) { g_dock++; sound_play(SFX_MOVE); }
+                else sound_play(SFX_EDGE);
+            }
             break;
-        case NAV_UP: if (g_zone > Z_PROFILE) g_zone--; break;
-        case NAV_DOWN: if (g_zone < Z_DOCK) g_zone++; break;
+        case NAV_UP:
+            if (g_zone > Z_PROFILE) { g_zone--; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+            break;
+        case NAV_DOWN:
+            if (g_zone < Z_DOCK) { g_zone++; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+            break;
         case NAV_A:
             if (g_zone == Z_PROFILE) profile_open();
             if (g_zone == Z_ROW) {
@@ -117,11 +141,14 @@ void home_frame() {
             if (g_zone == Z_ROW && a.game < (int)ps.size()) go(SCR_GAME);
             break;
         case NAV_PLUS:   // look again: this PC and GitHub
+            sound_play(SFX_OK);
             if (!scan_running()) scan_start();
             github_refresh(true);
             toast("Looking for ports on this PC and new releases on GitHub");
             break;
-        case NAV_B: if (g_zone != Z_ROW) g_zone = Z_ROW; break;
+        case NAV_B:
+            if (g_zone != Z_ROW) { g_zone = Z_ROW; sound_play(SFX_BACK); }
+            break;
         default: break;
         }
     }
@@ -137,22 +164,32 @@ void home_frame() {
 
     // mouse: hover focuses, click opens
     if (!g_power) {
-        if (hover(52, 23, 46, 46) && (a.mouse_moved || a.clicked)) {
-            g_zone = Z_PROFILE;
-            if (a.clicked) profile_open();
+        if (hover(52, 23, 46, 46)) {
+            if (a.mouse_moved && !a.clicked && g_zone != Z_PROFILE) { g_zone = Z_PROFILE; sound_play(SFX_MOVE); }
+            if (a.clicked) { g_zone = Z_PROFILE; profile_open(); }
         }
         for (int i = 0; i < n; ++i) {
             float x = 96 + i * (size + gap) - g_scroll;
-            if (hover(x, row_y, size, size) && (a.mouse_moved || a.clicked)) {
-                g_zone = Z_ROW, a.game = order[i], pos = i;
-                if (a.clicked) { if (order[i] < (int)ps.size()) go(SCR_GAME); else go(SCR_PORTS); }
+            if (hover(x, row_y, size, size)) {
+                if (a.mouse_moved && !a.clicked && (g_zone != Z_ROW || a.game != order[i])) {
+                    g_zone = Z_ROW, a.game = order[i], pos = i;
+                    sound_play(SFX_MOVE);
+                }
+                if (a.clicked) {
+                    g_zone = Z_ROW, a.game = order[i], pos = i;
+                    if (order[i] < (int)ps.size()) go(SCR_GAME);
+                    else go(SCR_PORTS);
+                }
             }
         }
         float dx0 = 640 - (kDockN * 70 + (kDockN - 1) * 26) / 2.0f;
         for (int i = 0; i < kDockN; ++i)
-            if (hover(dx0 + i * 96, 488, 70, 70) && (a.mouse_moved || a.clicked)) {
-                g_zone = Z_DOCK, g_dock = i;
-                if (a.clicked) open_dock(i);
+            if (hover(dx0 + i * 96, 488, 70, 70)) {
+                if (a.mouse_moved && !a.clicked && (g_zone != Z_DOCK || g_dock != i)) {
+                    g_zone = Z_DOCK, g_dock = i;
+                    sound_play(SFX_MOVE);
+                }
+                if (a.clicked) { g_zone = Z_DOCK, g_dock = i; open_dock(i); }
             }
     }
 

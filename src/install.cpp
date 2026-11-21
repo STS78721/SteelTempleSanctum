@@ -11,6 +11,7 @@
 #include "config.h"
 #include "github.h"
 #include "net.h"
+#include "sound.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -378,6 +379,7 @@ void install_poll(SDL_Window *w) {
         std::lock_guard<std::mutex> l(g_lock);
         done.swap(g_finished);
     }
+    if (!done.empty()) sound_play(SFX_NOTIFY);
     for (auto &f : done) {
         Port &p = ports()[f.port];
         if (f.kind == JOB_WIZARD) {

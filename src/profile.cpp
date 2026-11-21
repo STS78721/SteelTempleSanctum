@@ -8,6 +8,7 @@
 #include "avatars.h"
 #include "config.h"
 #include "draw.h"
+#include "sound.h"
 
 namespace sanctum {
 
@@ -61,6 +62,7 @@ static void choose() {
         cfg().avatar = avatar_name(v[g_sel]);
         toast("Icon: " + cfg().avatar);
     }
+    sound_play(SFX_TOGGLE_ON);
     config_save();
 }
 
@@ -109,6 +111,7 @@ static void kb_open() {
     g_kb = true, g_name = cfg().profile, g_shift = g_name.empty(), g_kx = 0, g_ky = 1;
     app().text_entry = true;
     SDL_StartTextInput((::SDL_Window *)app().window);
+    sound_play(SFX_OK);
 }
 static void kb_close(bool keep) {
     std::string n = g_name;
@@ -130,13 +133,14 @@ static void kb_press(const Key &k) {
         char ch = g_shift && k.ch >= 'a' && k.ch <= 'z' ? (char)(k.ch - 32) : k.ch;
         name_add(std::string(1, ch));
         if (g_shift && name_len(g_name) == 1) g_shift = false;   // after the first capital
+        sound_play(SFX_KEY);
         break;
     }
-    case K_SHIFT: g_shift = !g_shift; break;
-    case K_SPACE: name_add(" "); break;
-    case K_BACK: name_pop(); break;
-    case K_CANCEL: kb_close(false); break;
-    case K_OK: kb_close(true); break;
+    case K_SHIFT: g_shift = !g_shift; sound_play(SFX_TAB); break;
+    case K_SPACE: name_add(" "); sound_play(SFX_KEY); break;
+    case K_BACK: name_pop(); sound_play(SFX_BACK); break;
+    case K_CANCEL: sound_play(SFX_BACK); kb_close(false); break;
+    case K_OK: sound_play(SFX_OK); kb_close(true); break;
     }
 }
 
@@ -155,22 +159,23 @@ static void kb_frame() {
     const Palette &p = pal();
     auto ks = keys();
     // a physical keyboard
-    if (!a.typed.empty()) { name_add(a.typed); g_shift = false; }
-    if (a.key_back) name_pop();
-    if (a.key_enter) { kb_close(true); return; }
-    if (a.key_escape) { kb_close(false); return; }
+    if (!a.typed.empty()) { name_add(a.typed); g_shift = false; sound_play(SFX_KEY); }
+    if (a.key_back) { name_pop(); sound_play(SFX_BACK); }
+    if (a.key_enter) { sound_play(SFX_OK); kb_close(true); return; }
+    if (a.key_escape) { sound_play(SFX_BACK); kb_close(false); return; }
     // the pad
     int cur = kb_at(ks, g_ky, g_kx);
+    int pkx = g_kx, pky = g_ky;
     switch (a.nav) {
-    case NAV_LEFT: if (ks[cur].col > 0) g_kx = ks[cur].col - 1; else g_kx = 10; break;
-    case NAV_RIGHT: g_kx = ks[cur].col + ks[cur].w <= 10 ? ks[cur].col + ks[cur].w : 0; break;
-    case NAV_UP: g_ky = (g_ky + 4) % 5; break;
-    case NAV_DOWN: g_ky = (g_ky + 1) % 5; break;
+    case NAV_LEFT: if (ks[cur].col > 0) g_kx = ks[cur].col - 1; else g_kx = 10; sound_play(g_kx != pkx ? SFX_MOVE : SFX_EDGE); break;
+    case NAV_RIGHT: g_kx = ks[cur].col + ks[cur].w <= 10 ? ks[cur].col + ks[cur].w : 0; sound_play(g_kx != pkx ? SFX_MOVE : SFX_EDGE); break;
+    case NAV_UP: g_ky = (g_ky + 4) % 5; sound_play(g_ky != pky ? SFX_MOVE : SFX_EDGE); break;
+    case NAV_DOWN: g_ky = (g_ky + 1) % 5; sound_play(g_ky != pky ? SFX_MOVE : SFX_EDGE); break;
     case NAV_A: kb_press(ks[cur]); break;
-    case NAV_B: if (g_name.empty()) kb_close(false); else name_pop(); break;   // B deletes; empty, it leaves
-    case NAV_X: g_shift = !g_shift; break;
-    case NAV_Y: name_add(" "); break;
-    case NAV_PLUS: kb_close(true); break;
+    case NAV_B: sound_play(SFX_BACK); if (g_name.empty()) kb_close(false); else name_pop(); break;   // B deletes; empty, it leaves
+    case NAV_X: g_shift = !g_shift; sound_play(SFX_TAB); break;
+    case NAV_Y: name_add(" "); sound_play(SFX_KEY); break;
+    case NAV_PLUS: sound_play(SFX_OK); kb_close(true); break;
     default: break;
     }
     if (!g_kb) return;
@@ -191,7 +196,7 @@ static void kb_frame() {
         const Key &k = ks[i];
         float x = kx0 + k.col * kw + 4, y = ky0 + k.row * (kh + 8), w = k.w * kw - 8;
         if (hover(x, y, w, kh)) {
-            if (a.mouse_moved) g_kx = k.col, g_ky = k.row;
+            if (a.mouse_moved && !a.clicked && (g_kx != k.col || g_ky != k.row)) { g_kx = k.col, g_ky = k.row; sound_play(SFX_MOVE); }
             if (a.clicked) { g_kx = k.col, g_ky = k.row; kb_press(k); if (!g_kb) return; }
         }
         bool special = k.kind != K_CHAR && k.kind != K_SPACE;
@@ -232,12 +237,16 @@ void profile_frame() {
     switch (a.nav) {
     case NAV_Y: kb_open(); break;
     case NAV_B: go_back(); return;
-    case NAV_L: g_tab = (g_tab + tab_count() - 1) % tab_count(); land(); break;
-    case NAV_R: g_tab = (g_tab + 1) % tab_count(); land(); break;
-    case NAV_LEFT: if (g_sel > 0) g_sel--; break;
-    case NAV_RIGHT: if (g_sel < n - 1) g_sel++; break;
-    case NAV_UP: if (g_sel >= c) g_sel -= c; break;
-    case NAV_DOWN: if (g_sel + c < n) g_sel += c; else if (g_sel / c < (n - 1) / c) g_sel = n - 1; break;
+    case NAV_L: g_tab = (g_tab + tab_count() - 1) % tab_count(); land(); sound_play(SFX_TAB); break;
+    case NAV_R: g_tab = (g_tab + 1) % tab_count(); land(); sound_play(SFX_TAB); break;
+    case NAV_LEFT: if (g_sel > 0) { g_sel--; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
+    case NAV_RIGHT: if (g_sel < n - 1) { g_sel++; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
+    case NAV_UP: if (g_sel >= c) { g_sel -= c; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
+    case NAV_DOWN:
+        if (g_sel + c < n) { g_sel += c; sound_play(SFX_MOVE); }
+        else if (g_sel / c < (n - 1) / c) { g_sel = n - 1; sound_play(SFX_MOVE); }
+        else sound_play(SFX_EDGE);
+        break;
     case NAV_A: choose(); break;
     default: break;
     }
@@ -273,7 +282,7 @@ void profile_frame() {
     float x0 = 486, tx = x0;
     for (int t = 0; t < tab_count(); ++t) {
         float w = text_w(17, tab_name(t)) + 32;
-        if (a.clicked && hover(tx, 140, w, 40)) { g_tab = t; land(); }
+        if (a.clicked && hover(tx, 140, w, 40)) { if (g_tab != t) sound_play(SFX_TAB); g_tab = t; land(); }
         text(tx + 16, 148, 17, t == g_tab ? p.text : p.dim, tab_name(t));
         if (t == g_tab) g_tab_x = ease(g_tab_x ? g_tab_x : tx, tx, 20);
         tx += w;
@@ -289,7 +298,7 @@ void profile_frame() {
     for (int i = 0; i < n; ++i) {
         float cx = gx + (i % c) * cell + cell / 2, cy = gy + (i / c) * cell + cell / 2;
         if (hover(cx - r, cy - r, 2 * r, 2 * r)) {
-            if (a.mouse_moved) g_sel = i;
+            if (a.mouse_moved && !a.clicked && g_sel != i) { g_sel = i; sound_play(SFX_MOVE); }
             if (a.clicked) { g_sel = i; choose(); }
         }
         bool focused = i == g_sel;

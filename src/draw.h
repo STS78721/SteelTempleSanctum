@@ -36,7 +36,7 @@ void hint_bar(std::initializer_list<std::pair<Nav, const char *>> hints);
 void status_bar(bool show_profile = true);
 
 enum Icon { IC_NEWS, IC_DOWNLOAD, IC_MODS, IC_PROFILE, IC_PAD, IC_GEAR, IC_POWER, IC_FOLDER, IC_PALETTE, IC_LIBRARY,
-            IC_INFO, IC_PLAY, IC_SEARCH, IC_DRIVE, IC_UP, IC_CHECK, IC_DISPLAY, IC_PAUSE, IC_CLOSE, IC_STORE };
+            IC_INFO, IC_PLAY, IC_SEARCH, IC_DRIVE, IC_UP, IC_CHECK, IC_DISPLAY, IC_SOUND, IC_PAUSE, IC_CLOSE, IC_STORE };
 void icon(Icon i, float cx, float cy, float size, ImU32 col);
 
 // a port's tile: its cover, else its colours and monogram; badges for its state

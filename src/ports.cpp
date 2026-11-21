@@ -9,6 +9,7 @@
 #include "github.h"
 #include "install.h"
 #include "launch.h"
+#include "sound.h"
 
 namespace sanctum {
 
@@ -55,7 +56,7 @@ static void start_downloads() {
         ++n;
     }
     if (n) go(SCR_DOWNLOADS);
-    else toast("Tick a port first (A)");
+    else { sound_play(SFX_ERROR); toast("Tick a port first (A)"); }
 }
 
 void ports_frame() {
@@ -65,20 +66,28 @@ void ports_frame() {
     int n = (int)ps.size();
     if (g_focus > n) g_focus = n;
     switch (a.nav) {
-    case NAV_LEFT: if (g_focus < n && g_focus % kCols) g_focus--; break;
-    case NAV_RIGHT: if (g_focus < n - 1 && g_focus % kCols != kCols - 1) g_focus++; break;
-    case NAV_UP: if (g_focus == n) g_focus = std::max(0, n - 1); else if (g_focus >= kCols) g_focus -= kCols; break;
-    case NAV_DOWN: if (g_focus + kCols < n) g_focus += kCols; else g_focus = n; break;
+    case NAV_LEFT: if (g_focus < n && g_focus % kCols) { g_focus--; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
+    case NAV_RIGHT: if (g_focus < n - 1 && g_focus % kCols != kCols - 1) { g_focus++; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
+    case NAV_UP:
+        if (g_focus == n) { g_focus = std::max(0, n - 1); sound_play(SFX_MOVE); }
+        else if (g_focus >= kCols) { g_focus -= kCols; sound_play(SFX_MOVE); }
+        else sound_play(SFX_EDGE);
+        break;
+    case NAV_DOWN:
+        if (g_focus + kCols < n) { g_focus += kCols; sound_play(SFX_MOVE); }
+        else if (g_focus != n) { g_focus = n; sound_play(SFX_MOVE); }
+        else sound_play(SFX_EDGE);
+        break;
     case NAV_A:
         if (g_focus == n) start_downloads();
-        else if (can_get(g_focus)) g_sel[g_focus] = !g_sel[g_focus];
+        else if (can_get(g_focus)) { g_sel[g_focus] = !g_sel[g_focus]; sound_play(g_sel[g_focus] ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); }
         else if (!ps[g_focus].installs.empty()) { a.game = g_focus; go(SCR_GAME); return; }
         else if (install_queued(g_focus)) go(SCR_DOWNLOADS);
         break;
     case NAV_X:
         if (g_focus < n) {
             auto v = packages(ps[g_focus]);
-            if (v.size() > 1) g_pkg[g_focus] = package_of(g_focus) == v[0] ? v[1] : v[0];
+            if (v.size() > 1) { g_pkg[g_focus] = package_of(g_focus) == v[0] ? v[1] : v[0]; sound_play(SFX_TAB); }
         }
         break;
     case NAV_Y: folder_open(library_dir(), FOLDER_LIBRARY); return;
@@ -102,8 +111,12 @@ void ports_frame() {
         const Port &port = ps[i];
         float x = x0 + (i % kCols) * (cw + gx), y = y0 + (i / kCols) * (ch + gy);
         if (hover(x, y, cw, ch)) {
-            if (a.mouse_moved) g_focus = i;
-            if (a.clicked) { g_focus = i; if (can_get(i)) g_sel[i] = !g_sel[i]; else if (!port.installs.empty()) { a.game = i; go(SCR_GAME); return; } }
+            if (a.mouse_moved && !a.clicked && g_focus != i) { g_focus = i; sound_play(SFX_MOVE); }
+            if (a.clicked) {
+                g_focus = i;
+                if (can_get(i)) { g_sel[i] = !g_sel[i]; sound_play(g_sel[i] ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); }
+                else if (!port.installs.empty()) { a.game = i; go(SCR_GAME); return; }
+            }
         }
         rect(x, y + 5, cw, ch, with_alpha(IM_COL32_BLACK, p.light ? 18 : 60), 16);
         rect(x, y, cw, ch, p.panel, 16);
@@ -141,7 +154,10 @@ void ports_frame() {
     std::string s2 = (count ? mb(total) + " to download  ·  " : std::string()) + "installs into " + shown_path(library_dir()) +"   (Y changes)";
     text(120, sy + 42, 14, p.soft, fit(14, s2, 760).c_str());
     float bw = 210, bx = 1184 - 16 - bw, by = sy + 12;
-    if (hover(bx, by, bw, 52)) { if (a.mouse_moved) g_focus = n; if (a.clicked) start_downloads(); }
+    if (hover(bx, by, bw, 52)) {
+        if (a.mouse_moved && !a.clicked && g_focus != n) { g_focus = n; sound_play(SFX_MOVE); }
+        if (a.clicked) start_downloads();
+    }
     rect(bx, by, bw, 52, count ? p.accent : p.line, 26);
     icon(IC_DOWNLOAD, bx + 34, by + 26, 20, IM_COL32_WHITE);
     text(bx + 56, by + 14, 19, IM_COL32_WHITE, count ? ("Download " + std::to_string(count)).c_str() : "Download");
@@ -172,13 +188,14 @@ void downloads_frame() {
     int n = (int)jobs.size();
     if (g_row >= n) g_row = std::max(0, n - 1);
     switch (a.nav) {
-    case NAV_UP: if (g_row > 0) g_row--; break;
-    case NAV_DOWN: if (g_row < n - 1) g_row++; break;
-    case NAV_X: if (n && jobs[g_row].phase < PH_WIZARD) { install_cancel(jobs[g_row].id); toast("Cancelled"); } break;
-    case NAV_Y: install_clear_finished(); break;
+    case NAV_UP: if (g_row > 0) { g_row--; sound_play(SFX_MOVE); } else if (n) sound_play(SFX_EDGE); break;
+    case NAV_DOWN: if (g_row < n - 1) { g_row++; sound_play(SFX_MOVE); } else if (n) sound_play(SFX_EDGE); break;
+    case NAV_X: if (n && jobs[g_row].phase < PH_WIZARD) { install_cancel(jobs[g_row].id); sound_play(SFX_BACK); toast("Cancelled"); } break;
+    case NAV_Y: sound_play(SFX_OK); install_clear_finished(); break;
     case NAV_A:
         if (n && jobs[g_row].phase == PH_DONE) { a.game = jobs[g_row].port; go(SCR_GAME); return; }
         if (n && (jobs[g_row].phase == PH_FAILED || jobs[g_row].phase == PH_CANCELLED)) {   // try again
+            sound_play(SFX_OK);
             const Port &port = ports()[jobs[g_row].port];
             for (const Release &r : port.releases)
                 if (r.tag == jobs[g_row].tag)
@@ -204,7 +221,7 @@ void downloads_frame() {
         const JobView &j = jobs[i];
         const Port &port = ports()[j.port];
         float y = 140 + (i - top) * 122, x = 96, w = 1088;
-        if (hover(x, y, w, 110) && a.mouse_moved) g_row = i;
+        if (hover(x, y, w, 110) && a.mouse_moved && !a.clicked && g_row != i) { g_row = i; sound_play(SFX_MOVE); }
         rect(x, y, w, 110, p.panel, 16);
         tile(port, x + 14, y + 14, 82, 1, false);
         std::string verb = j.kind == JOB_UPDATE ? "Updating " : j.kind == JOB_WIZARD ? "Setting up " : "Installing ";
@@ -272,12 +289,12 @@ void news_frame() {
     int n = (int)items.size();
     if (g_news >= n) g_news = std::max(0, n - 1);
     switch (a.nav) {
-    case NAV_UP: if (g_news > 0) g_news--; break;
-    case NAV_DOWN: if (g_news < n - 1) g_news++; break;
-    case NAV_L: g_news = std::max(0, g_news - 6); break;
-    case NAV_R: g_news = std::min(std::max(0, n - 1), g_news + 6); break;
+    case NAV_UP: if (g_news > 0) { g_news--; sound_play(SFX_MOVE); } else if (n) sound_play(SFX_EDGE); break;
+    case NAV_DOWN: if (g_news < n - 1) { g_news++; sound_play(SFX_MOVE); } else if (n) sound_play(SFX_EDGE); break;
+    case NAV_L: if (n) { int prev = g_news; g_news = std::max(0, g_news - 6); sound_play(g_news != prev ? SFX_MOVE : SFX_EDGE); } break;
+    case NAV_R: if (n) { int prev = g_news; g_news = std::min(std::max(0, n - 1), g_news + 6); sound_play(g_news != prev ? SFX_MOVE : SFX_EDGE); } break;
     case NAV_A: if (n) { game_show_release(items[g_news].port, items[g_news].rel->tag); return; } break;
-    case NAV_PLUS: github_refresh(true); toast("Asking GitHub for new releases"); break;
+    case NAV_PLUS: sound_play(SFX_OK); github_refresh(true); toast("Asking GitHub for new releases"); break;
     case NAV_B: go_back(); return;
     default: break;
     }
@@ -292,7 +309,10 @@ void news_frame() {
         const NewsItem &it = items[i];
         const Port &port = ports()[it.port];
         float y = 152 + (i - top) * 70, x = 96;
-        if (hover(x, y, 1088, 62)) { if (a.mouse_moved) g_news = i; if (a.clicked) { game_show_release(it.port, it.rel->tag); return; } }
+        if (hover(x, y, 1088, 62)) {
+            if (a.mouse_moved && !a.clicked && g_news != i) { g_news = i; sound_play(SFX_MOVE); }
+            if (a.clicked) { game_show_release(it.port, it.rel->tag); return; }
+        }
         rect(x, y, 1088, 62, p.panel, 12);
         tile(port, x + 8, y + 8, 46, 1, false);
         text(x + 70, y + 9, 17, p.text, (std::string(port.name) + "  " + it.rel->tag).c_str());

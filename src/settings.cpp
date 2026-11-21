@@ -10,13 +10,14 @@
 #include "input.h"
 #include "install.h"
 #include "selfupdate.h"
+#include "sound.h"
 
 namespace sanctum {
 
 // ======================= System Settings
-enum Cat { CAT_DISPLAY, CAT_THEMES, CAT_COVERS, CAT_LIBRARY, CAT_CONTROLLERS, CAT_ABOUT, CAT_N };
-static const char *kCatName[] = {"Display", "Themes", "Cover art", "Ports on this PC", "Controllers", "About Sanctum"};
-static const Icon kCatIcon[] = {IC_DISPLAY, IC_PALETTE, IC_FOLDER, IC_LIBRARY, IC_PAD, IC_INFO};
+enum Cat { CAT_DISPLAY, CAT_SOUND, CAT_THEMES, CAT_COVERS, CAT_LIBRARY, CAT_CONTROLLERS, CAT_ABOUT, CAT_N };
+static const char *kCatName[] = {"Display", "Sound", "Themes", "Cover art", "Ports on this PC", "Controllers", "About Sanctum"};
+static const Icon kCatIcon[] = {IC_DISPLAY, IC_SOUND, IC_PALETTE, IC_FOLDER, IC_LIBRARY, IC_PAD, IC_INFO};
 static int g_cat = 0, g_row = 0;
 static bool g_in_rows = false;
 
@@ -25,7 +26,7 @@ struct Row {
     int id;          // what A does
     bool toggle = false, on = false;
 };
-enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_UPDATE, R_AUTO_UPDATE, R_INFO };
+enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_SOUNDS, R_SOUND_VOL, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_UPDATE, R_AUTO_UPDATE, R_INFO };
 
 static std::vector<Row> rows_of(int cat) {
     std::vector<Row> r;
@@ -40,6 +41,13 @@ static std::vector<Row> rows_of(int cat) {
         if (m) r.push_back({"Screen", std::string(name ? name : "Display") + "  ·  " + std::to_string(m->w) + " x " +
                                           std::to_string(m->h) + "  ·  " + std::to_string((int)(m->refresh_rate + 0.5f)) + " Hz", R_INFO});
         r.push_back({"Shortcut", "F11 or Alt+Enter switches fullscreen at any time", R_INFO});
+        break;
+    }
+    case CAT_SOUND: {
+        static const char *const vols[] = {"Low", "Medium", "High"};
+        r.push_back({"Menu sounds", "", R_SOUNDS, true, c.sounds});
+        r.push_back({"Volume", vols[c.sound_volume % 3], R_SOUND_VOL});
+        r.push_back({"UI sounds", "Console menu sounds; paused while a game runs", R_INFO});
         break;
     }
     case CAT_THEMES:
@@ -99,15 +107,25 @@ static std::vector<Row> rows_of(int cat) {
 static void act(const Row &r) {
     Config &c = cfg();
     switch (r.id) {
-    case R_THEME: c.theme ^= 1; theme_set(c.theme); break;
-    case R_FOLLOW: c.follow = !c.follow; break;
-    case R_TILES: c.large_tiles = !c.large_tiles; break;
-    case R_FULLSCREEN: set_fullscreen(!c.fullscreen); return;
-    case R_HIDE_CURSOR: c.hide_cursor = !c.hide_cursor; if (!c.hide_cursor) SDL_ShowCursor(); break;
+    case R_THEME: c.theme ^= 1; theme_set(c.theme); sound_play(SFX_OK); break;
+    case R_FOLLOW: c.follow = !c.follow; sound_play(c.follow ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
+    case R_TILES: c.large_tiles = !c.large_tiles; sound_play(SFX_OK); break;
+    case R_FULLSCREEN: set_fullscreen(!c.fullscreen); sound_play(c.fullscreen ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); return;
+    case R_HIDE_CURSOR: c.hide_cursor = !c.hide_cursor; if (!c.hide_cursor) SDL_ShowCursor(); sound_play(c.hide_cursor ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
+    case R_SOUNDS:
+        c.sounds = !c.sounds;
+        sound_set_enabled(c.sounds);
+        if (c.sounds) sound_play(SFX_TOGGLE_ON);
+        break;
+    case R_SOUND_VOL:
+        c.sound_volume = (c.sound_volume + 1) % 3;
+        sound_set_volume(c.sound_volume);
+        sound_play(SFX_OK);
+        break;
     case R_FOLDER: folder_open(c.cover_dir); return;
-    case R_RELOAD: covers_reload(); toast("Reading your cover art"); return;
-    case R_SEARCH: scan_start(); return;
-    case R_DEV: c.hide_dev = !c.hide_dev; catalog_refilter(); break;
+    case R_RELOAD: covers_reload(); toast("Reading your cover art"); sound_play(SFX_OK); return;
+    case R_SEARCH: scan_start(); sound_play(SFX_OK); return;
+    case R_DEV: c.hide_dev = !c.hide_dev; catalog_refilter(); sound_play(!c.hide_dev ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
     case R_LIBDIR: folder_open(library_dir(), FOLDER_LIBRARY); return;
     case R_PORT: {
         for (int i = 0; i < (int)ports().size(); ++i)
@@ -117,18 +135,19 @@ static void act(const Row &r) {
     case R_PADS: go(SCR_CONTROLLERS); return;
     case R_UPDATE:
         switch (self_update_state()) {
-        case UPD_READY: self_update_apply(true); return;
-        case UPD_AVAILABLE: self_update_download(); return;
+        case UPD_READY: sound_play(SFX_OK); self_update_apply(true); return;
+        case UPD_AVAILABLE: sound_play(SFX_OK); self_update_download(); return;
         case UPD_CHECKING: case UPD_DOWNLOADING: return;
-        default: self_update_start(true); return;
+        default: sound_play(SFX_OK); self_update_start(true); return;
         }
-    case R_AUTO_UPDATE: c.auto_update = !c.auto_update; break;
+    case R_AUTO_UPDATE: c.auto_update = !c.auto_update; sound_play(c.auto_update ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
     case R_LAYOUT:   // takes effect on the next press: the press that changed it was read the old way
         c.pad_layout = (c.pad_layout + 1) % 3;
         toast(c.pad_layout == 1 ? "Switch style: A on the right confirms" : c.pad_layout == 2 ? "Xbox style: A at the bottom confirms"
                                                                                : "Confirm follows each pad's own labels");
+        sound_play(SFX_OK);
         break;
-    case R_ICONS: c.button_icons = (c.button_icons + 1) % 4; input_refresh_style(); break;
+    case R_ICONS: c.button_icons = (c.button_icons + 1) % 4; input_refresh_style(); sound_play(SFX_OK); break;
     default: return;
     }
     config_save();
@@ -146,25 +165,39 @@ void settings_frame() {
 
     switch (a.nav) {
     case NAV_UP:
-        if (!g_in_rows) g_cat = std::max(0, g_cat - 1);
-        else for (int i = g_row - 1; i >= 0; --i) if (focusable(i)) { g_row = i; break; }
+        if (!g_in_rows) {
+            if (g_cat > 0) { g_cat--; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else {
+            int prev = g_row;
+            for (int i = g_row - 1; i >= 0; --i) if (focusable(i)) { g_row = i; break; }
+            sound_play(g_row != prev ? SFX_MOVE : SFX_EDGE);
+        }
         break;
     case NAV_DOWN:
-        if (!g_in_rows) g_cat = std::min(CAT_N - 1, g_cat + 1);
-        else for (int i = g_row + 1; i < (int)rows.size(); ++i) if (focusable(i)) { g_row = i; break; }
+        if (!g_in_rows) {
+            if (g_cat < CAT_N - 1) { g_cat++; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else {
+            int prev = g_row;
+            for (int i = g_row + 1; i < (int)rows.size(); ++i) if (focusable(i)) { g_row = i; break; }
+            sound_play(g_row != prev ? SFX_MOVE : SFX_EDGE);
+        }
         break;
     case NAV_RIGHT:
     case NAV_A:
         if (!g_in_rows) {
             int f = first_focusable();
-            if (f >= 0) g_in_rows = true, g_row = f;
+            if (f >= 0) { g_in_rows = true, g_row = f; sound_play(SFX_OK); }
         } else if (a.nav == NAV_A && g_row < (int)rows.size()) {
             act(rows[g_row]);
         }
         break;
-    case NAV_LEFT: g_in_rows = false; break;
+    case NAV_LEFT:
+        if (g_in_rows) { g_in_rows = false; sound_play(SFX_BACK); }
+        break;
     case NAV_B:
-        if (g_in_rows) g_in_rows = false;
+        if (g_in_rows) { g_in_rows = false; sound_play(SFX_BACK); }
         else { go_back(); return; }
         break;
     default: break;
@@ -179,8 +212,8 @@ void settings_frame() {
     for (int i = 0; i < CAT_N; ++i) {
         float y = 146 + i * 54;
         if (hover(44, y, 280, 46)) {
-            if (a.mouse_moved) g_cat = i, g_in_rows = false;
-            if (a.clicked) g_cat = i, g_in_rows = false;
+            if (a.mouse_moved && !a.clicked && (g_cat != i || g_in_rows)) { g_cat = i, g_in_rows = false; sound_play(SFX_MOVE); }
+            if (a.clicked) { if (g_cat != i) sound_play(SFX_MOVE); g_cat = i, g_in_rows = false; }
         }
         bool sel = i == g_cat;
         if (sel) { rect(44, y, 280, 46, p.panel, 12); rect(44, y + 8, 4, 30, p.accent, 2); }
@@ -196,7 +229,7 @@ void settings_frame() {
         float y = 146 + i * 56;
         bool f = g_in_rows && i == g_row;
         if (focusable(i) && hover(x, y, w, 48)) {
-            if (a.mouse_moved) g_in_rows = true, g_row = i;
+            if (a.mouse_moved && !a.clicked && (!g_in_rows || g_row != i)) { g_in_rows = true, g_row = i; sound_play(SFX_MOVE); }
             if (a.clicked) { g_in_rows = true, g_row = i; act(r); }
         }
         rect(x, y, w, 48, p.panel, 12);
@@ -279,14 +312,15 @@ void folder_frame() {
     int n = (int)g_entries.size();
     const int kVisible = 8;
     switch (a.nav) {
-    case NAV_UP: if (g_sel > 0) g_sel--; break;
-    case NAV_DOWN: if (g_sel < n - 1) g_sel++; break;
-    case NAV_L: g_sel = std::max(0, g_sel - kVisible); break;
-    case NAV_R: g_sel = std::min(n - 1, g_sel + kVisible); break;
-    case NAV_A: if (n) { list_dir(g_entries[g_sel].path); return; } break;
+    case NAV_UP: if (g_sel > 0) { g_sel--; sound_play(SFX_MOVE); } else if (n) sound_play(SFX_EDGE); break;
+    case NAV_DOWN: if (g_sel < n - 1) { g_sel++; sound_play(SFX_MOVE); } else if (n) sound_play(SFX_EDGE); break;
+    case NAV_L: if (n) { int prev = g_sel; g_sel = std::max(0, g_sel - kVisible); sound_play(g_sel != prev ? SFX_MOVE : SFX_EDGE); } break;
+    case NAV_R: if (n) { int prev = g_sel; g_sel = std::min(n - 1, g_sel + kVisible); sound_play(g_sel != prev ? SFX_MOVE : SFX_EDGE); } break;
+    case NAV_A: if (n) { sound_play(SFX_OK); list_dir(g_entries[g_sel].path); return; } break;
     case NAV_B:
         if (g_dir.empty()) { go_back(); return; }
         else {
+            sound_play(SFX_BACK);
             std::string from = g_dir;
             list_dir(parent_of(g_dir));
             for (int i = 0; i < (int)g_entries.size(); ++i) if (g_entries[i].path == from) g_sel = i;
@@ -303,7 +337,8 @@ void folder_frame() {
                 toast("New ports will install into " + g_dir, 3.5);
             }
             config_save();
-            go_back();
+            sound_play(SFX_TOGGLE_ON);
+            go_back(true);
             return;
         }
         break;
@@ -323,8 +358,8 @@ void folder_frame() {
     for (int i = g_top; i < n && i < g_top + kVisible; ++i) {
         float y = 168 + (i - g_top) * 56;
         if (hover(96, y, 1088, 48)) {
-            if (a.mouse_moved) g_sel = i;
-            if (a.clicked) { list_dir(g_entries[i].path); return; }
+            if (a.mouse_moved && !a.clicked && g_sel != i) { g_sel = i; sound_play(SFX_MOVE); }
+            if (a.clicked) { sound_play(SFX_OK); list_dir(g_entries[i].path); return; }
         }
         rect(96, y, 1088, 48, p.panel, 12);
         icon(g_entries[i].icon, 128, y + 24, 22, p.soft);

@@ -14,6 +14,7 @@
 #include "draw.h"
 #include "json.h"
 #include "launch.h"
+#include "sound.h"
 
 namespace sanctum {
 
@@ -250,16 +251,25 @@ static void step(const SetRow &r, int dir) {
     std::string v = current(r);
     if (r.type == "toggle") {
         int on = choice_index(r, v);
-        write_value(r, on ? "0" : "1", false);
+        bool next_on = !on;
+        if (write_value(r, next_on ? "1" : "0", false)) {
+            bool vis_on = r.inverted ? !next_on : next_on;
+            sound_play(vis_on ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        } else {
+            sound_play(SFX_ERROR);
+        }
     } else if (r.type == "choice") {
         int n = (int)r.values.size(), i = choice_index(r, v);
         i = i < 0 ? 0 : (i + dir + n) % n;
-        if (r.values[i].empty()) write_value(r, "", true);   // the automatic choice: the key unset
-        else write_value(r, r.values[i], false);
+        bool ok = r.values[i].empty() ? write_value(r, "", true)   // the automatic choice: the key unset
+                                      : write_value(r, r.values[i], false);
+        sound_play(ok ? SFX_MOVE : SFX_ERROR);
     } else if (r.type == "slider") {
-        float x = (float)atof(v.c_str()) + dir * r.step;
-        x = std::min(r.hi, std::max(r.lo, x));
-        write_value(r, number(x, r.step), false);
+        float cur_x = (float)atof(v.c_str());
+        float x = std::min(r.hi, std::max(r.lo, cur_x + dir * r.step));
+        if (std::fabs(x - cur_x) < 1e-5f) { sound_play(SFX_EDGE); return; }
+        bool ok = write_value(r, number(x, r.step), false);
+        sound_play(ok ? SFX_KEY : SFX_ERROR);
     }
 }
 
@@ -279,34 +289,52 @@ void port_settings_frame() {
 
     switch (a.nav) {
     case NAV_UP:
-        if (!g_in_rows) g_page = std::max(0, g_page - 1), g_row = 0, g_scroll = 0;
-        else for (int i = g_row - 1; i >= 0; --i) if (focusable(i)) { g_row = i; break; }
+        if (!g_in_rows) {
+            if (g_page > 0) { g_page--, g_row = 0, g_scroll = 0; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else {
+            int prev = g_row;
+            for (int i = g_row - 1; i >= 0; --i) if (focusable(i)) { g_row = i; break; }
+            sound_play(g_row != prev ? SFX_MOVE : SFX_EDGE);
+        }
         break;
     case NAV_DOWN:
-        if (!g_in_rows) g_page = std::min((int)s->pages.size() - 1, g_page + 1), g_row = 0, g_scroll = 0;
-        else for (int i = g_row + 1; i < (int)page.rows.size(); ++i) if (focusable(i)) { g_row = i; break; }
+        if (!g_in_rows) {
+            if (g_page < (int)s->pages.size() - 1) { g_page++, g_row = 0, g_scroll = 0; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else {
+            int prev = g_row;
+            for (int i = g_row + 1; i < (int)page.rows.size(); ++i) if (focusable(i)) { g_row = i; break; }
+            sound_play(g_row != prev ? SFX_MOVE : SFX_EDGE);
+        }
         break;
-    case NAV_L: g_page = (g_page + (int)s->pages.size() - 1) % (int)s->pages.size(), g_row = 0, g_scroll = 0; break;
-    case NAV_R: g_page = (g_page + 1) % (int)s->pages.size(), g_row = 0, g_scroll = 0; break;
+    case NAV_L: g_page = (g_page + (int)s->pages.size() - 1) % (int)s->pages.size(), g_row = 0, g_scroll = 0; sound_play(SFX_TAB); break;
+    case NAV_R: g_page = (g_page + 1) % (int)s->pages.size(), g_row = 0, g_scroll = 0; sound_play(SFX_TAB); break;
     case NAV_RIGHT:
     case NAV_LEFT:
-        if (!g_in_rows) { if (a.nav == NAV_RIGHT) g_in_rows = true; break; }
-        if (locked) { toast("Close the game to change its settings"); break; }
-        if (!env_fixed(*s, page.rows[g_row])) step(page.rows[g_row], a.nav == NAV_RIGHT ? 1 : -1);
+        if (!g_in_rows) { if (a.nav == NAV_RIGHT) { g_in_rows = true; sound_play(SFX_OK); } break; }
+        if (locked) { sound_play(SFX_ERROR); toast("Close the game to change its settings"); break; }
+        if (env_fixed(*s, page.rows[g_row])) { sound_play(SFX_ERROR); break; }
+        step(page.rows[g_row], a.nav == NAV_RIGHT ? 1 : -1);
         break;
     case NAV_A:
-        if (!g_in_rows) { g_in_rows = true; break; }
-        if (locked) { toast("Close the game to change its settings"); break; }
-        if (!env_fixed(*s, page.rows[g_row])) step(page.rows[g_row], 1);
+        if (!g_in_rows) { g_in_rows = true; sound_play(SFX_OK); break; }
+        if (locked) { sound_play(SFX_ERROR); toast("Close the game to change its settings"); break; }
+        if (env_fixed(*s, page.rows[g_row])) { sound_play(SFX_ERROR); break; }
+        step(page.rows[g_row], 1);
         break;
     case NAV_Y:
-        if (g_in_rows && !locked) {
-            write_value(page.rows[g_row], "", true);
+        if (g_in_rows && locked) {
+            sound_play(SFX_ERROR);
+            toast("Close the game to change its settings");
+        } else if (g_in_rows) {
+            if (write_value(page.rows[g_row], "", true)) sound_play(SFX_BACK);
+            else sound_play(SFX_ERROR);
             toast("Back to the game's default");
         }
         break;
     case NAV_B:
-        if (g_in_rows) g_in_rows = false;
+        if (g_in_rows) { g_in_rows = false; sound_play(SFX_BACK); }
         else { go_back(); return; }
         break;
     default: break;
@@ -328,7 +356,10 @@ void port_settings_frame() {
     rect(340, 150, 1, 500, with_alpha(p.line, 160));
     for (int i = 0; i < (int)s->pages.size() && i < 10; ++i) {
         float y = 150 + i * 48;
-        if (hover(44, y, 280, 42) && (a.mouse_moved || a.clicked)) g_page = i, g_in_rows = false, g_scroll = 0;
+        if (hover(44, y, 280, 42)) {
+            if (a.mouse_moved && !a.clicked && (g_page != i || g_in_rows)) { g_page = i, g_in_rows = false, g_scroll = 0; sound_play(SFX_MOVE); }
+            if (a.clicked) { if (g_page != i) sound_play(SFX_MOVE); g_page = i, g_in_rows = false, g_scroll = 0; }
+        }
         bool sel = i == g_page;
         if (sel) { rect(44, y, 280, 42, panel, 12); rect(44, y + 8, 4, 26, acc, 2); }
         text(68, y + 11, 17, sel ? p.text : p.soft, fit(17, s->pages[i].title, 240).c_str());
@@ -356,8 +387,8 @@ void port_settings_frame() {
         std::string v = current(r, &mine);
         bool fixed = env_fixed(*s, r);
         if (hover(x, y, w, 44) && !locked) {
-            if (a.mouse_moved) g_in_rows = true, g_row = i;
-            if (a.clicked && !fixed) { g_in_rows = true, g_row = i; step(r, 1); v = current(r, &mine); }
+            if (a.mouse_moved && !a.clicked && (!g_in_rows || g_row != i)) { g_in_rows = true, g_row = i; sound_play(SFX_MOVE); }
+            if (a.clicked) { g_in_rows = true, g_row = i; if (fixed) sound_play(SFX_ERROR); else { step(r, 1); v = current(r, &mine); } }
         }
         rect(x, y, w, 44, panel, 10);
         ImU32 lc = fixed || locked ? p.dim : p.text;

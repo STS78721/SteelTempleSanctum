@@ -36,6 +36,7 @@
 #include "input.h"
 #include "stb_image.h"   // implemented in covers.cpp
 #include "launch.h"
+#include "sound.h"
 #include "theme.h"
 
 namespace sanctum {
@@ -43,15 +44,17 @@ namespace sanctum {
 static App g_app;
 App &app() { return g_app; }
 
-void go(Screen s) {
+void go(Screen s, bool silent) {
     if (s == g_app.screen) return;
+    if (!silent) sound_play(SFX_OK);
     g_app.back.push_back(g_app.screen);
     g_app.screen = s;
     g_app.nav = NAV_NONE;
     g_app.clicked = false;
 }
 
-void go_back() {
+void go_back(bool silent) {
+    if (!silent) sound_play(SFX_BACK);
     g_app.screen = g_app.back.empty() ? SCR_HOME : g_app.back.back();
     if (!g_app.back.empty()) g_app.back.pop_back();
     g_app.nav = NAV_NONE;
@@ -132,6 +135,9 @@ int main(int, char **) {
     config_load();
     if (const char *t = getenv("SANCTUM_THEME")) cfg().theme = !strcmp(t, "light");
     theme_set(cfg().theme);
+    sound_init();
+    sound_set_volume(cfg().sound_volume);
+    sound_set_enabled(cfg().sounds);
 
     App &a = app();
     SDL_Window *win = SDL_CreateWindow("SteelTemple Sanctum", 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
@@ -238,11 +244,18 @@ int main(int, char **) {
         if (frame >= 30 && (frame - 30) % 8 == 0 && (size_t)((frame - 30) / 8) < script.size())
             a.nav = script[(frame - 30) / 8];
         if (a.nav == NAV_HOME && a.text_entry) { a.text_entry = false; SDL_StopTextInput(win); }   // typing ends unsaved
-        if (a.nav == NAV_HOME) { a.back.clear(); a.screen = SCR_HOME; a.nav = NAV_NONE; }
+        if (a.nav == NAV_HOME) {
+            if (a.screen != SCR_HOME) sound_play(SFX_HOME);
+            a.back.clear();
+            a.screen = SCR_HOME;
+            a.nav = NAV_NONE;
+        }
         background_poll(win);
         covers_poll(a.now);
-        if (self_update_poll())
+        if (self_update_poll()) {
+            sound_play(SFX_NOTIFY);
             toast("Sanctum " + self_update_tag() + " is ready: it installs when you close Sanctum (or System Settings > About)", 6);
+        }
 
         // fit the canvas into the window
         ImGui_ImplSDLRenderer3_NewFrame();
@@ -273,7 +286,7 @@ int main(int, char **) {
         if (starting) {
             const Palette &p = pal();
             int pi = running_port();
-            if (start_nav == NAV_B) { close_game(); toast("Start cancelled"); }
+            if (start_nav == NAV_B) { sound_play(SFX_BACK); close_game(); toast("Start cancelled"); }
             if (pi >= 0) {
                 const Port &port = ports()[pi];
                 float in = SDL_min(1.0f, (float)running_seconds() * 4);   // fades in over a quarter second
@@ -309,6 +322,7 @@ int main(int, char **) {
 
     // a downloaded update goes in now, for the next start (a restart from About has put it in already)
     if (self_update_state() == UPD_READY) self_update_apply(false);
+    sound_shutdown();
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();

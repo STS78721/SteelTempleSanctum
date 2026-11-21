@@ -92,6 +92,17 @@ work everywhere too.
 <img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: Button layout and Button icons">
 </div>
 
+### 🔊 Console menu sounds
+
+Clean, tactile Switch 2–style UI sounds play as you move focus, hit edges, confirm, go back, flip tabs, toggle
+settings, type on the on-screen keyboard, return Home, or start a game, and pause automatically while a game is
+running. **System Settings > Sound** lets you turn **Menu sounds** off at any time and choose a **Volume** (**Low**,
+**Medium** or **High**).
+
+<div align="center">
+<img src="docs/screenshots/sound.png" width="800" alt="System Settings, Sound: Menu sounds toggle and Volume">
+</div>
+
 ### 👤 Your profile icon
 
 Pick your icon from 60 original designs in six sets (SteelTemple, Creatures, Food, Nature, Space and Play), then

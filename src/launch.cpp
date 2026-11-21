@@ -9,6 +9,7 @@
 
 #include "app.h"
 #include "config.h"
+#include "sound.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -108,12 +109,12 @@ static std::mutex g_lock;
 static std::vector<std::pair<int, LastRun>> g_judged;
 
 bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
-    if (g_proc) { toast("A game is already running"); return false; }
-    if (demo_mode()) { toast("Demo mode: games don't start"); return false; }
+    if (g_proc) { sound_play(SFX_ERROR); toast("A game is already running"); return false; }
+    if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: games don't start"); return false; }
     const Port &p = ports()[port_i];
     const Profile *pr = profile_of(p);
     bool play = !own_launcher && can_play(p, in);
-    if (!play && !p.launcher) { toast(std::string(p.name) + " is missing " + missing_for_play(p, in)); return false; }
+    if (!play && !p.launcher) { sound_play(SFX_ERROR); toast(std::string(p.name) + " is missing " + missing_for_play(p, in)); return false; }
 
     std::string exe = in.dir + "\\" + (play ? p.exe : p.launcher);
     std::vector<std::string> argv{exe};
@@ -148,6 +149,7 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     SDL_DestroyProperties(props);
     SDL_DestroyEnvironment(env);
     if (!g_proc) {
+        sound_play(SFX_ERROR);
         toast(std::string("Could not start ") + p.name + ": " + SDL_GetError(), 4);
         return false;
     }
@@ -159,6 +161,7 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     g_pid = (DWORD)SDL_GetNumberProperty(SDL_GetProcessProperties(g_proc), SDL_PROP_PROCESS_PID_NUMBER, 0);
     if (g_pid) AllowSetForegroundWindow(g_pid);
     g_starting = true;
+    sound_play(SFX_LAUNCH);
     (void)w;
     return true;
 }
@@ -376,6 +379,7 @@ void launch_poll(SDL_Window *w) {
                 g_starting = false;
                 bring_to_front(f.found, false);
                 SDL_MinimizeWindow(w);
+                sound_set_paused(true);
             }
         }
         return;
@@ -388,6 +392,7 @@ void launch_poll(SDL_Window *w) {
     if (secs >= 10) playtime_add(g_port, secs);
     // back in front: restored (still fullscreen if it was), and given the foreground the game just let go of
     SDL_RestoreWindow(w);
+    sound_set_paused(false);
     bring_to_front(hwnd_of(w), !was_starting);
     SDL_RaiseWindow(w);
     // back on the game's page, its last run being judged

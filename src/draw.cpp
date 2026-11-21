@@ -255,6 +255,11 @@ void icon(Icon i, float cx, float cy, float s, ImU32 c) {
         R(-0.7f, -0.35f, 0.7f, 0.8f, 0.12f);
         d->PathArcTo(P(cx, cy - 0.35f * h), S(0.32f * h), 3.14159f, 6.28318f, 16); d->PathStroke(c, 0, t); break;
     case IC_DISPLAY: R(-0.85f, -0.65f, 0.85f, 0.4f, 0.1f); L(0, 0.4f, 0, 0.7f); L(-0.4f, 0.75f, 0.4f, 0.75f); break;
+    case IC_SOUND:
+        L(-0.82f, -0.24f, -0.52f, -0.24f); L(-0.52f, -0.24f, -0.14f, -0.58f); L(-0.14f, -0.58f, -0.14f, 0.58f);
+        L(-0.14f, 0.58f, -0.52f, 0.24f); L(-0.52f, 0.24f, -0.82f, 0.24f); L(-0.82f, 0.24f, -0.82f, -0.24f);
+        d->PathArcTo(P(cx - 0.02f * h, cy), S(0.42f * h), -0.65f, 0.65f, 16); d->PathStroke(c, 0, t);
+        d->PathArcTo(P(cx - 0.02f * h, cy), S(0.74f * h), -0.65f, 0.65f, 16); d->PathStroke(c, 0, t); break;
     case IC_PAUSE: L(-0.3f, -0.6f, -0.3f, 0.6f); L(0.3f, -0.6f, 0.3f, 0.6f); break;
     case IC_CLOSE: L(-0.55f, -0.55f, 0.55f, 0.55f); L(-0.55f, 0.55f, 0.55f, -0.55f); break;
     }

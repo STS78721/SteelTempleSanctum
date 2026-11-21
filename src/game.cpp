@@ -12,13 +12,15 @@
 #include "install.h"
 #include "launch.h"
 #include "port_settings.h"
+#include "sound.h"
 
 namespace sanctum {
 
 static const char *kTabs[] = {"Overview", "Release notes", "Settings", "Mods", "Files & storage"};
 static const int kTabN = 5;
 static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0;
-static float g_tab_x = 0, g_scroll = 0, g_scroll_to = 0;
+static float g_tab_x = 0, g_scroll = 0, g_scroll_to = 0, g_notes_max = 0;
+static int g_notes_game = -1, g_notes_rel = -1;
 enum { ROW_ACTIONS, ROW_COPIES, ROW_RELEASES, ROW_NOTES, ROW_SETTINGS };
 static int g_row = ROW_ACTIONS;
 
@@ -139,12 +141,13 @@ void game_frame() {
         case ACT_PLAY: if (in) launch(a.window, a.game, *in, false); break;
         case ACT_LAUNCHER: if (in) launch(a.window, a.game, *in, true); break;
         case ACT_CLOSE:
-            if (a.now - g_close_armed < 3) { close_game(); toast("Closing " + std::string(port.name)); g_close_armed = -10; }
-            else { g_close_armed = a.now; toast("Press again to close the game (unsaved progress is lost)", 3); }
+            if (a.now - g_close_armed < 3) { sound_play(SFX_BACK); close_game(); toast("Closing " + std::string(port.name)); g_close_armed = -10; }
+            else { sound_play(SFX_ERROR); g_close_armed = a.now; toast("Press again to close the game (unsaved progress is lost)", 3); }
             break;
-        case ACT_LOG: if (lr) SDL_OpenURL(("file:///" + lr->log).c_str()); break;
-        case ACT_REPORT: SDL_OpenURL((std::string("https://github.com/") + port.repo + "/issues/new").c_str()); break;
+        case ACT_LOG: if (lr) { sound_play(SFX_OK); SDL_OpenURL(("file:///" + lr->log).c_str()); } break;
+        case ACT_REPORT: sound_play(SFX_OK); SDL_OpenURL((std::string("https://github.com/") + port.repo + "/issues/new").c_str()); break;
         case ACT_ISSUE: {
+            sound_play(SFX_OK);
             std::string n = lr ? lr->issue : "";
             if (!n.empty() && n[0] == '#') n.erase(0, 1);
             SDL_OpenURL((std::string("https://github.com/") + port.repo + "/issues/" + n).c_str());
@@ -152,23 +155,25 @@ void game_frame() {
         }
         case ACT_PROGRESS: go(SCR_DOWNLOADS); break;
         case ACT_DOWNLOAD: {
-            if (!latest) { toast(github_busy() ? "Still asking GitHub, one moment" : "No release found on GitHub"); break; }
+            if (!latest) { sound_play(SFX_ERROR); toast(github_busy() ? "Still asking GitHub, one moment" : "No release found on GitHub"); break; }
             if (const Asset *as = latest->find(ASSET_PORTABLE)) install_enqueue(a.game, *latest, *as, JOB_INSTALL);
             else if (const Asset *w = latest->find(ASSET_WIZARD)) install_enqueue(a.game, *latest, *w, JOB_WIZARD);
-            else { toast("This release has no download Sanctum can install"); break; }
+            else { sound_play(SFX_ERROR); toast("This release has no download Sanctum can install"); break; }
+            sound_play(SFX_OK);
             toast(std::string(port.name) + " added to Downloads");
             break;
         }
         case ACT_UPDATE: {
-            if (game_running()) { toast("Close the game first"); break; }
+            if (game_running()) { sound_play(SFX_ERROR); toast("Close the game first"); break; }
             const Install *b = port.best();
             const Asset *up = latest ? latest->find(ASSET_UPDATE) : nullptr;
-            if (!b || !up) { toast("This release has no update package; Download installs it fresh"); break; }
+            if (!b || !up) { sound_play(SFX_ERROR); toast("This release has no update package; Download installs it fresh"); break; }
             install_enqueue(a.game, *latest, *up, JOB_UPDATE, b->dir);
+            sound_play(SFX_OK);
             toast(std::string(port.name) + " update added to Downloads");
             break;
         }
-        case ACT_GITHUB: SDL_OpenURL((std::string("https://github.com/") + port.repo + "/releases").c_str()); break;
+        case ACT_GITHUB: sound_play(SFX_OK); SDL_OpenURL((std::string("https://github.com/") + port.repo + "/releases").c_str()); break;
         }
     };
 
@@ -176,38 +181,63 @@ void game_frame() {
     bool copies_here = g_tab == 0 && port.installs.size() > 1;
     bool notes_here = g_tab == 1 && !port.releases.empty();
     switch (a.nav) {
-    case NAV_LEFT: if (g_row == ROW_ACTIONS && g_action > 0) g_action--; break;
-    case NAV_RIGHT: if (g_row == ROW_ACTIONS && g_action < (int)acts.size() - 1) g_action++; break;
+    case NAV_LEFT:
+        if (g_row == ROW_ACTIONS) {
+            if (g_action > 0) { g_action--; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        }
+        break;
+    case NAV_RIGHT:
+        if (g_row == ROW_ACTIONS) {
+            if (g_action < (int)acts.size() - 1) { g_action++; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        }
+        break;
     case NAV_DOWN:
-        if (g_row == ROW_ACTIONS && copies_here) g_row = ROW_COPIES;
-        else if (g_row == ROW_ACTIONS && notes_here) g_row = ROW_RELEASES;
-        else if (g_row == ROW_ACTIONS && g_tab == 2 && in) g_row = ROW_SETTINGS;
-        else if (g_row == ROW_COPIES && g_copy < (int)port.installs.size() - 1) g_copy++;
-        else if (g_row == ROW_RELEASES && g_rel < (int)port.releases.size() - 1) g_rel++, g_scroll_to = 0;
-        else if (g_row == ROW_NOTES) g_scroll_to += 90;
+        if (g_row == ROW_ACTIONS && copies_here) { g_row = ROW_COPIES; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_ACTIONS && notes_here) { g_row = ROW_RELEASES; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_ACTIONS && g_tab == 2 && in) { g_row = ROW_SETTINGS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_COPIES) {
+            if (g_copy < (int)port.installs.size() - 1) { g_copy++; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else if (g_row == ROW_RELEASES) {
+            if (g_rel < (int)port.releases.size() - 1) { g_rel++, g_scroll_to = 0; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else if (g_row == ROW_NOTES) {
+            bool at_end = g_notes_game == a.game && g_notes_rel == g_rel && g_scroll_to >= g_notes_max;
+            if (!at_end) { g_scroll_to += 90; sound_play(SFX_KEY); }
+            else sound_play(SFX_EDGE);
+        } else {
+            sound_play(SFX_EDGE);
+        }
         break;
     case NAV_UP:
-        if (g_row == ROW_COPIES) { if (g_copy > 0) g_copy--; else g_row = ROW_ACTIONS; }
-        else if (g_row == ROW_RELEASES) { if (g_rel > 0) g_rel--, g_scroll_to = 0; else g_row = ROW_ACTIONS; }
-        else if (g_row == ROW_NOTES) g_scroll_to = std::max(0.0f, g_scroll_to - 90);
-        else if (g_row == ROW_SETTINGS) g_row = ROW_ACTIONS;
+        if (g_row == ROW_COPIES) { if (g_copy > 0) g_copy--; else g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_RELEASES) { if (g_rel > 0) g_rel--, g_scroll_to = 0; else g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_NOTES) {
+            if (g_scroll_to > 0) { g_scroll_to = std::max(0.0f, g_scroll_to - 90); sound_play(SFX_KEY); }
+            else sound_play(SFX_EDGE);
+        }
+        else if (g_row == ROW_SETTINGS) { g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else sound_play(SFX_EDGE);
         break;
-    case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; break;
-    case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; break;
+    case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; sound_play(SFX_TAB); break;
+    case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; sound_play(SFX_TAB); break;
     case NAV_A:
         if (g_row == ROW_COPIES) {   // remembered: Play starts this copy from now on
             catalog_prefer(a.game, port.installs[g_copy].dir);
             g_copy = 0, g_row = ROW_ACTIONS, g_action = 0;
+            sound_play(SFX_TOGGLE_ON);
             toast("Play starts this copy from now on");
         }
-        else if (g_row == ROW_RELEASES) g_row = ROW_NOTES;
+        else if (g_row == ROW_RELEASES) { g_row = ROW_NOTES; sound_play(SFX_OK); }
         else if (g_row == ROW_ACTIONS) run(acts[g_action].id);
         else if (g_row == ROW_SETTINGS) { /* the tab body opens it (below), with a.nav still A */ }
         break;
     case NAV_Y: run(ACT_GITHUB); break;
     case NAV_B:
-        if (g_row == ROW_NOTES) { g_row = ROW_RELEASES; break; }
-        if (g_row != ROW_ACTIONS) { g_row = ROW_ACTIONS; break; }
+        if (g_row == ROW_NOTES) { g_row = ROW_RELEASES; sound_play(SFX_BACK); break; }
+        if (g_row != ROW_ACTIONS) { g_row = ROW_ACTIONS; sound_play(SFX_BACK); break; }
         go_back();
         return;
     default: break;
@@ -252,8 +282,11 @@ void game_frame() {
     for (int i = 0; i < (int)acts.size(); ++i) {
         bool primary = i == 0;
         float w = text_w(19, acts[i].label.c_str()) + (primary ? 84 : 72);
-        if (a.mouse_moved && hover(ax, 268, w, 58)) g_row = ROW_ACTIONS, g_action = i;
-        if (a.clicked && hover(ax, 268, w, 58)) run(acts[i].id);
+        if (a.mouse_moved && !a.clicked && hover(ax, 268, w, 58) && (g_row != ROW_ACTIONS || g_action != i)) {
+            g_row = ROW_ACTIONS, g_action = i;
+            sound_play(SFX_MOVE);
+        }
+        if (a.clicked && hover(ax, 268, w, 58)) { g_row = ROW_ACTIONS, g_action = i; run(acts[i].id); }
         rect(ax, 268 + 4, w, 58, with_alpha(IM_COL32_BLACK, p.light ? 20 : 60), 29);
         rect(ax, 268, w, 58, primary ? port.colours.accent : p.panel, 29);
         ImU32 a_ = port.colours.accent;
@@ -268,7 +301,7 @@ void game_frame() {
     float tx = x;
     for (int i = 0; i < kTabN; ++i) {
         float w = text_w(17, kTabs[i]) + 32;
-        if (a.clicked && hover(tx, 352, w, 40)) g_tab = i, g_row = ROW_ACTIONS;
+        if (a.clicked && hover(tx, 352, w, 40)) { if (g_tab != i) sound_play(SFX_TAB); g_tab = i, g_row = ROW_ACTIONS; }
         text(tx + 16, 360, 17, i == g_tab ? p.text : p.dim, kTabs[i]);
         if (i == g_tab) g_tab_x = ease(g_tab_x, tx, 20);
         tx += w;
@@ -323,7 +356,7 @@ void game_frame() {
                                   (c.registered ? "  ·  Setup Wizard" : "") + (c.dev ? "  ·  build folder" : "");
                 text(x + 768, y + 11, 14, p.dim, tag.c_str(), 1);
                 if (g_row == ROW_COPIES && i == g_copy) focus_ring(x, y, 780, 42, 10, 3);
-                if (a.clicked && hover(x, y, 780, 42)) g_copy = i;
+                if (a.clicked && hover(x, y, 780, 42) && g_copy != i) { g_copy = i; sound_play(SFX_MOVE); }
             }
         }
         break;
@@ -339,7 +372,7 @@ void game_frame() {
         for (int i = top; i < (int)port.releases.size() && i < top + 5; ++i) {
             const Release &r = port.releases[i];
             float y = by + (i - top) * 46;
-            if (hover(x, y, 190, 40)) { if (a.clicked) g_rel = i, g_row = ROW_NOTES, g_scroll_to = 0; }
+            if (hover(x, y, 190, 40)) { if (a.clicked) { g_rel = i, g_row = ROW_NOTES, g_scroll_to = 0; sound_play(SFX_OK); } }
             rect(x, y, 190, 40, i == g_rel ? p.panel : with_alpha(p.panel, 110), 10);
             text(x + 12, y + 4, 15, p.text, fit(15, r.tag, 170).c_str());
             bool have = false;
@@ -364,7 +397,9 @@ void game_frame() {
             y += text_wrap(nx + 18 + ix, y, 14, p.soft, l.text.c_str(), tw - ix) + 4;
         }
         float content = y + g_scroll - (ny + 14);
-        g_scroll_to = std::min(g_scroll_to, std::max(0.0f, content - nh + 28));
+        g_notes_max = std::max(0.0f, content - nh + 28);
+        g_notes_game = a.game, g_notes_rel = g_rel;
+        g_scroll_to = std::min(g_scroll_to, g_notes_max);
         dl()->PopClipRect();
         if (content > nh) {   // where in the notes
             float bh = nh * nh / content;
@@ -380,7 +415,10 @@ void game_frame() {
         std::string sub = has ? std::to_string(ps->count) + " settings on " + std::to_string(ps->pages.size()) + " pages, as in the game's own menu" +
                                     (port_settings_changed(a.game) ? "  ·  " + std::to_string(port_settings_changed(a.game)) + " set by you" : "")
                               : "Sanctum does not have a list for this port yet; A opens its launcher's settings.";
-        if (hover(x, by, 780, 74)) { if (a.mouse_moved) g_row = ROW_SETTINGS; if (a.clicked) g_row = ROW_SETTINGS, a.nav = NAV_A; }
+        if (hover(x, by, 780, 74)) {
+            if (a.mouse_moved && !a.clicked && g_row != ROW_SETTINGS) { g_row = ROW_SETTINGS; sound_play(SFX_MOVE); }
+            if (a.clicked) g_row = ROW_SETTINGS, a.nav = NAV_A;
+        }
         rect(x, by, 780, 74, p.panel, 14);
         rect(x, by, 6, 74, port.colours.accent, 3);
         icon(IC_GEAR, x + 40, by + 37, 26, port.colours.accent);

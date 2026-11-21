@@ -58,8 +58,8 @@ struct App {
 };
 
 App &app();
-void go(Screen s);               // open a screen (remembers the way back)
-void go_back();
+void go(Screen s, bool silent = false);               // open a screen (remembers the way back)
+void go_back(bool silent = false);
 void toast(const std::string &text, double seconds = 2.6);
 void set_fullscreen(bool on);    // applies and remembers it (Settings > Display, F11, Alt+Enter)
 // a line in the file SANCTUM_LOG names (debugging; nothing is written without it). Safe from any thread.
