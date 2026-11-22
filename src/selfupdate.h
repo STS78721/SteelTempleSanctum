@@ -11,7 +11,7 @@
 #pragma once
 #include <string>
 
-#define SANCTUM_VERSION "1.0.4b"
+#define SANCTUM_VERSION "1.0.5"
 
 namespace sanctum {
 

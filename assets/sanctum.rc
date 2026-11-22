@@ -6,8 +6,8 @@
 1 24 "sanctum.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,4,1
-PRODUCTVERSION 1,0,4,1
+FILEVERSION 1,0,5,0
+PRODUCTVERSION 1,0,5,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -18,8 +18,8 @@ BEGIN
       VALUE "CompanyName", "SteelTemple"
       VALUE "FileDescription", "SteelTemple Sanctum"
       VALUE "ProductName", "SteelTemple Sanctum"
-      VALUE "FileVersion", "1.0.4b"
-      VALUE "ProductVersion", "1.0.4b"
+      VALUE "FileVersion", "1.0.5"
+      VALUE "ProductVersion", "1.0.5"
       VALUE "OriginalFilename", "SteelTemple-Sanctum.exe"
     END
   END
