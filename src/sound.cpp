@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "app.h"
+#include "input.h"
 
 namespace sanctum {
 
@@ -305,25 +306,41 @@ void sound_shutdown() {
 }
 
 void sound_play(Sfx s) {
-    if (s < 0 || s >= SFX_COUNT || !g_stream) return;
-    std::lock_guard<std::mutex> l(g_lock);
-    if (!g_enabled || g_paused) return;
-
-    Sint64 now = (Sint64)SDL_GetTicks();
+    if (s < 0 || s >= SFX_COUNT) return;
     Sint64 cooldown = (s == SFX_MOVE || s == SFX_KEY) ? 25 : (s == SFX_EDGE ? 150 : 20);
-    if (now - g_last_ms[s] < cooldown) return;
-    g_last_ms[s] = now;
+    bool fire = false;
+    {
+        std::lock_guard<std::mutex> l(g_lock);
+        if (g_paused) return;
+        Sint64 now = (Sint64)SDL_GetTicks();
+        if (now - g_last_ms[s] < cooldown) return;
+        g_last_ms[s] = now;
+        fire = true;
 
-    // find an idle slot, or steal the furthest-along voice if all 16 are busy
-    int slot = -1;
-    size_t max_pos = 0;
-    int oldest = 0;
-    for (int i = 0; i < kMaxVoices; ++i) {
-        if (!g_voices[i].active) { slot = i; break; }
-        if (g_voices[i].pos >= max_pos) { max_pos = g_voices[i].pos; oldest = i; }
+        if (g_stream && g_enabled) {
+            // find an idle slot, or steal the furthest-along voice if all 16 are busy
+            int slot = -1;
+            size_t max_pos = 0;
+            int oldest = 0;
+            for (int i = 0; i < kMaxVoices; ++i) {
+                if (!g_voices[i].active) { slot = i; break; }
+                if (g_voices[i].pos >= max_pos) { max_pos = g_voices[i].pos; oldest = i; }
+            }
+            if (slot < 0) slot = oldest;
+            g_voices[slot] = {s, 0, true};
+        }
     }
-    if (slot < 0) slot = oldest;
-    g_voices[slot] = {s, 0, true};
+    if (fire) {
+        Haptic h = HAP_TICK;
+        switch (s) {
+        case SFX_OK: case SFX_TOGGLE_ON: case SFX_HOME: case SFX_NOTIFY: h = HAP_OK; break;
+        case SFX_BACK: case SFX_TOGGLE_OFF: h = HAP_BACK; break;
+        case SFX_LAUNCH: h = HAP_LAUNCH; break;
+        case SFX_ERROR: case SFX_EDGE: h = HAP_ERROR; break;
+        default: h = HAP_TICK; break;
+        }
+        input_rumble(h);
+    }
 }
 
 void sound_set_enabled(bool on) {

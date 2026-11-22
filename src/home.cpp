@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "avatars.h"
 #include "config.h"
 #include "covers.h"
 #include "draw.h"
@@ -25,7 +26,7 @@ static const DockItem kDock[] = {
 };
 static const int kDockN = sizeof kDock / sizeof kDock[0];
 
-static int g_zone = Z_ROW, g_dock = 0;
+static int g_zone = Z_ROW, g_dock = 0, g_prof_sel = 0;
 static float g_scroll = 0, g_tint_t = 0;
 static ImU32 g_tint = 0;
 static float g_pop[16];             // each tile's grow when focused
@@ -37,7 +38,7 @@ static void open_dock(int i) {
     case 0: go(SCR_NEWS); break;
     case 1: go(SCR_PORTS); break;
     case 2: go(SCR_DOWNLOADS); break;
-    case 3: app().soon_title = "Mods"; go(SCR_SOON); break;
+    case 3: mods_open(-1); break;
     case 4: go(SCR_CONTROLLERS); break;
     case 5: go(SCR_SETTINGS); break;
     case 6:   // the press that opens the menu must not also pick in it
@@ -99,11 +100,30 @@ void home_frame() {
     for (int i = 0; i < n; ++i)
         if (order[i] == a.game) pos = i;
 
+    int prof_n = (int)cfg().profiles.size();
+    int prof_slots = prof_n + (prof_n < 4 ? 1 : 0);
+    if (g_prof_sel >= prof_slots) g_prof_sel = std::max(0, prof_slots - 1);
+
+    auto pick_profile = [&](int idx) {
+        if (idx == prof_n) {
+            if (profile_add() >= 0) { g_prof_sel = cfg().active_profile; profile_open(); }
+        } else if (idx != cfg().active_profile) {
+            profile_switch(idx);
+            sound_play(SFX_TOGGLE_ON);
+            toast("Switched to " + cfg().profile);
+        } else {
+            profile_open();
+        }
+    };
+
     if (!g_power) {
         // ---- input
         switch (a.nav) {
         case NAV_LEFT:
-            if (g_zone == Z_ROW) {
+            if (g_zone == Z_PROFILE) {
+                if (g_prof_sel > 0) { g_prof_sel--; sound_play(SFX_MOVE); }
+                else sound_play(SFX_EDGE);
+            } else if (g_zone == Z_ROW) {
                 if (pos > 0) { a.game = order[--pos]; sound_play(SFX_MOVE); }
                 else sound_play(SFX_EDGE);
             } else if (g_zone == Z_DOCK) {
@@ -112,7 +132,10 @@ void home_frame() {
             }
             break;
         case NAV_RIGHT:
-            if (g_zone == Z_ROW) {
+            if (g_zone == Z_PROFILE) {
+                if (g_prof_sel < prof_slots - 1) { g_prof_sel++; sound_play(SFX_MOVE); }
+                else sound_play(SFX_EDGE);
+            } else if (g_zone == Z_ROW) {
                 if (pos < n - 1) { a.game = order[++pos]; sound_play(SFX_MOVE); }
                 else sound_play(SFX_EDGE);
             } else if (g_zone == Z_DOCK) {
@@ -121,15 +144,18 @@ void home_frame() {
             }
             break;
         case NAV_UP:
-            if (g_zone > Z_PROFILE) { g_zone--; sound_play(SFX_MOVE); }
-            else sound_play(SFX_EDGE);
+            if (g_zone > Z_PROFILE) {
+                g_zone--;
+                if (g_zone == Z_PROFILE) g_prof_sel = cfg().active_profile;
+                sound_play(SFX_MOVE);
+            } else sound_play(SFX_EDGE);
             break;
         case NAV_DOWN:
             if (g_zone < Z_DOCK) { g_zone++; sound_play(SFX_MOVE); }
             else sound_play(SFX_EDGE);
             break;
         case NAV_A:
-            if (g_zone == Z_PROFILE) profile_open();
+            if (g_zone == Z_PROFILE) pick_profile(g_prof_sel);
             if (g_zone == Z_ROW) {
                 if (a.game < (int)ps.size() && (!ps[a.game].installs.empty() || install_queued(a.game))) go(SCR_GAME);
                 else if (a.game < (int)ps.size()) get_ports_select(a.game);   // not on this PC: straight to getting it
@@ -164,9 +190,15 @@ void home_frame() {
 
     // mouse: hover focuses, click opens
     if (!g_power) {
-        if (hover(52, 23, 46, 46)) {
-            if (a.mouse_moved && !a.clicked && g_zone != Z_PROFILE) { g_zone = Z_PROFILE; sound_play(SFX_MOVE); }
-            if (a.clicked) { g_zone = Z_PROFILE; profile_open(); }
+        for (int i = 0; i < prof_slots; ++i) {
+            float cx = 67 + i * 58, cy = 46;
+            if (hover(cx - 23, cy - 23, 46, 46)) {
+                if (a.mouse_moved && !a.clicked && (g_zone != Z_PROFILE || g_prof_sel != i)) {
+                    g_zone = Z_PROFILE, g_prof_sel = i;
+                    sound_play(SFX_MOVE);
+                }
+                if (a.clicked) { g_zone = Z_PROFILE, g_prof_sel = i; pick_profile(i); }
+            }
         }
         for (int i = 0; i < n; ++i) {
             float x = 96 + i * (size + gap) - g_scroll;
@@ -200,8 +232,28 @@ void home_frame() {
     g_tint_t = std::min(1.0f, g_tint_t + a.dt * 4);
     g_tint = mix(g_tint ? g_tint : want_tint, want_tint, g_tint_t);
     background(g_tint);
-    status_bar();
-    if (g_zone == Z_PROFILE) focus_ring(44, 23, 46, 46, 23, 4);
+    status_bar(false);
+    // top-left profile row (Switch style: active + other local profiles + "+")
+    prof_n = (int)cfg().profiles.size();
+    prof_slots = prof_n + (prof_n < 4 ? 1 : 0);
+    for (int i = 0; i < prof_n; ++i) {
+        const PlayerProfile &pr = cfg().profiles[i];
+        float cx = 67 + i * 58, cy = 46;
+        bool active = i == cfg().active_profile;
+        avatar_draw(avatar_find(pr.avatar), pr.avatar_bg, cx, cy, 23, active ? 1.0f : 0.72f);
+        if (active && prof_n > 1) dl()->AddCircle(P(cx, cy), S(25), with_alpha(p.text, 160), 32, S(2));
+        if (g_zone == Z_PROFILE && g_prof_sel == i) focus_ring(cx - 23, cy - 23, 46, 46, 23, 4);
+    }
+    if (prof_n < 4) {
+        float cx = 67 + prof_n * 58, cy = 46;
+        bool f = g_zone == Z_PROFILE && g_prof_sel == prof_n;
+        bool show_plus = g_zone == Z_PROFILE || prof_n > 1 || hover(cx - 23, cy - 23, 46, 46);
+        if (show_plus) {
+            circle(cx, cy, 20, f ? p.panel2 : with_alpha(p.panel, 150));
+            text(cx, cy - 13, 22, f ? p.text : p.soft, "+", 0.5f);
+            if (f) focus_ring(cx - 21, cy - 21, 42, 42, 21, 4);
+        }
+    }
 
     // the focused title above the row
     std::string title, sub;
@@ -222,8 +274,12 @@ void home_frame() {
         }
     } else if (g_zone == Z_DOCK) {
         title = kDock[g_dock].label;
+    } else if (g_prof_sel == prof_n) {
+        title = "New profile", sub = "Add another local profile (up to 4)";
+    } else if (g_prof_sel != cfg().active_profile) {
+        title = cfg().profiles[g_prof_sel].name, sub = "A switches to this profile";
     } else {
-        title = cfg().profile, sub = "Your name and icon";
+        title = cfg().profile, sub = "Your name, icon and play activity";
     }
     text(96, row_y - 54, 27, p.text, fit(27, title, 700).c_str());
     if (!sub.empty()) text(96 + text_w(27, fit(27, title, 700).c_str()) + 16, row_y - 46, 16, p.soft, fit(16, sub, 1100 - text_w(27, title.c_str())).c_str());

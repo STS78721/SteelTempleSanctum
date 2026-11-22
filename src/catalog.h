@@ -84,6 +84,9 @@ void version_probe_start();
 bool version_probe_poll();   // UI thread: 1 when versions changed
 // a copy Sanctum has just installed or updated (no search needed)
 void catalog_installed(int port, const std::string &dir, const std::string &version);
+std::string catalog_match_folder(const std::string &dir);      // matched port title(s) if dir holds a port, else ""
+int catalog_add_folder(const std::string &dir);                // manually register a port folder; returns ports added
+bool catalog_remove(int port, const std::string &dir);         // drop a deleted/uninstalled copy from library.ini
 std::string tag_key(const std::string &s);   // "Beta 6.3" == "Beta-6.3"
 bool port_files(const Port &p, const std::string &dir);   // dir holds this port (its game or its launcher)
 // the game program exists (a port that builds its game on this PC has only its launcher until the first setup)

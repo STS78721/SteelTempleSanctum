@@ -18,8 +18,8 @@ enum Nav { NAV_NONE, NAV_LEFT, NAV_RIGHT, NAV_UP, NAV_DOWN, NAV_A, NAV_B, NAV_X,
 // What the connected pad's face buttons look like, for the button hints.
 enum PadStyle { PAD_KEYBOARD, PAD_XBOX, PAD_NINTENDO, PAD_PLAYSTATION, PAD_GENERIC };
 
-enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE };
-enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY };
+enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE, SCR_MODS };
+enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY, FOLDER_ADD_PORT };
 
 struct Toast {
     std::string text;
@@ -35,6 +35,8 @@ struct App {
 
     // the canvas: canvas point (x, y) is drawn at origin + (x, y) * scale
     float scale = 1, ox = 0, oy = 0;
+    double trans_t = -10;        // time of last screen switch, for smooth fade/glide transition
+    int trans_dir = 0;           // +1 forward, -1 back
 
     // input this frame
     Nav nav = NAV_NONE;          // one action per frame (repeat for held directions is in input.cpp)
@@ -86,8 +88,10 @@ void ports_frame();       // Get ports
 void downloads_frame();   // the downloads queue
 void news_frame();        // Releases & news
 void port_settings_frame();   // a port's own settings (port_settings.cpp)
-void profile_open();          // the player's profile: icon and colour (profile.cpp)
+void profile_open();          // the player's profile: icon, colour, name, play activity (profile.cpp)
 void profile_frame();
+void mods_open(int port = -1);// per-port mod manager (mods.cpp)
+void mods_frame();
 
 // the controller folder picker; X sets the cover-art folder or the folder new ports install into
 void folder_open(const std::string &start, FolderFor what = FOLDER_COVERS);

@@ -50,6 +50,7 @@ static bool exists(const std::string &p);
 static void refilter();
 static void rank(std::vector<Install> &v);
 static void apply_known_versions(const Port &p, std::vector<Install> &v);
+static bool version_newer(const std::string &a, const std::string &b);
 
 bool port_files(const Port &p, const std::string &dir) {
     return exists(dir + "\\" + p.exe) || (p.launcher && exists(dir + "\\" + p.launcher));
@@ -95,7 +96,79 @@ PortState Port::state() const {
     // only when the installed version is an older release of this port: a newer local build is no "update"
     for (const Release &r : releases)
         if (tag_key(r.tag) == have) return PORT_UPDATE;
-    return releases.empty() && have != tag_key(known_tag) ? PORT_UPDATE : PORT_INSTALLED;
+    return releases.empty() && version_newer(known_tag, b->version) ? PORT_UPDATE : PORT_INSTALLED;
+}
+
+static std::string read_version(const std::string &dir);
+
+static bool folder_matches_port(const Port &p, const std::string &dir) {
+    bool game = exists(dir + "\\" + p.exe) && (!p.also || exists(dir + "\\" + p.also));
+    return game || (p.launcher && exists(dir + "\\" + p.launcher));
+}
+
+std::string catalog_match_folder(const std::string &dir) {
+    if (dir.empty()) return {};
+    std::string out;
+    for (const Port &p : g_ports)
+        if (folder_matches_port(p, dir)) out += (out.empty() ? "" : ", ") + std::string(p.name);
+    return out;
+}
+
+int catalog_add_folder(const std::string &dir) {
+    if (dir.empty()) return 0;
+    std::string clean = dir;
+    while (clean.size() > 3 && (clean.back() == '\\' || clean.back() == '/')) clean.pop_back();
+    int added = 0;
+    for (size_t i = 0; i < g_ports.size(); ++i) {
+        Port &p = g_ports[i];
+        if (!folder_matches_port(p, clean)) continue;
+        bool had = false;
+        for (Install &in : p.all)
+            if (lower(in.dir) == lower(clean)) {
+                in.dev = false;
+                in.launcher = p.launcher && exists(clean + "\\" + p.launcher);
+                if (in.version.empty()) in.version = read_version(clean);
+                had = true;
+                break;
+            }
+        if (!had) {
+            Install in;
+            in.dir = clean;
+            in.version = read_version(clean);
+            in.launcher = p.launcher && exists(clean + "\\" + p.launcher);
+            in.dev = false;
+            p.all.push_back(std::move(in));
+        }
+        apply_known_versions(p, p.all);
+        rank(p.all);
+        if (p.installs.empty()) cfg().prefer[p.id] = clean;
+        ++added;
+    }
+    if (added) {
+        refilter();
+        library_save();
+        config_save();
+        version_probe_start();
+    }
+    return added;
+}
+
+bool catalog_remove(int port, const std::string &dir) {
+    if (port < 0 || port >= (int)g_ports.size()) return false;
+    Port &p = g_ports[port];
+    std::string low = lower(dir);
+    size_t before = p.all.size();
+    p.all.erase(std::remove_if(p.all.begin(), p.all.end(), [&](const Install &in) { return lower(in.dir) == low; }),
+                p.all.end());
+    if (p.all.size() == before) return false;
+    auto it = cfg().prefer.find(p.id);
+    if (it != cfg().prefer.end() && lower(it->second) == low) {
+        cfg().prefer.erase(it);
+        config_save();
+    }
+    refilter();
+    library_save();
+    return true;
 }
 
 void catalog_installed(int port, const std::string &dir, const std::string &version) {
@@ -428,7 +501,7 @@ void library_load() {
 // a match standing alone (no letter, digit or dot either side); the newest tag found wins.
 struct ProbeJob {
     int port;
-    std::string dir, exe;
+    std::string dir, exe, id, exe_stem, title, tag_sig;
     std::vector<std::string> tags;   // newest first
 };
 struct ProbeHit {
@@ -438,9 +511,18 @@ struct ProbeHit {
 static std::mutex g_probe_lock;
 static std::vector<ProbeHit> g_probe_hits;
 static std::atomic<bool> g_probe_running{false}, g_probe_again{false};
-static std::map<std::string, std::string> g_probe_cache;   // "<exe>|<size>|<time>" -> version ("" = none found)
+static std::map<std::string, std::string> g_probe_cache;   // "<exe>|<size>|<time>|v2|<tag_sig>" -> version
 static bool g_probe_cache_loaded = false;
 static std::string probe_cache_path() { return config_dir() + "versions.ini"; }
+
+static std::string tags_signature(const std::vector<std::string> &tags) {
+    return (tags.empty() ? std::string("none") : tags[0]) + ":" + std::to_string(tags.size());
+}
+
+static std::string port_tags_signature(const Port &p) {
+    if (p.releases.empty()) return std::string("known:") + p.known_tag;
+    return p.releases[0].tag + ":" + std::to_string(p.releases.size());
+}
 
 static void probe_cache_load() {
     g_probe_cache_loaded = true;
@@ -455,80 +537,179 @@ static void probe_cache_load() {
         if (end == std::string::npos) end = all.size();
         std::string l = all.substr(at, end - at);
         at = end + 1;
+        if (!l.empty() && l.back() == '\r') l.pop_back();
         size_t eq = l.rfind('=');
-        if (eq != std::string::npos && l[0] != '#') g_probe_cache[l.substr(0, eq)] = l.substr(eq + 1);
+        if (eq == std::string::npos || l.empty() || l[0] == '#') continue;
+        std::string k = l.substr(0, eq);
+        // Drop legacy v1 entries (without |v2|): they could permanently cache "" before a new tag arrived on GitHub
+        if (k.find("|v2|") == std::string::npos) continue;
+        g_probe_cache[k] = l.substr(eq + 1);
     }
 }
 
 static void probe_cache_save() {
-    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>=<version>)\n";
+    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>|v2|<tags>=<version>)\n";
     for (auto &e : g_probe_cache) s += e.first + "=" + e.second + "\n";
     std::string tmp = probe_cache_path() + ".tmp";
     if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), probe_cache_path().c_str());
 }
 
-static std::string probe_key(const std::string &exe) {
+static std::string probe_prefix(const std::string &exe) {
     SDL_PathInfo i;
     if (!SDL_GetPathInfo(exe.c_str(), &i)) return {};
-    return exe + "|" + std::to_string(i.size) + "|" + std::to_string(i.modify_time);
+    return exe + "|" + std::to_string(i.size) + "|" + std::to_string(i.modify_time) + "|v2|";
 }
 
-static std::string probe_file(const std::string &exe, const std::vector<std::string> &tags) {
+static bool valid_ver(const std::string &s) {
+    if (s.size() < 3 || s.size() > 24) return false;
+    bool digit = false, dot = false;
+    for (unsigned char c : s) {
+        if (SDL_isdigit(c)) digit = true;
+        else if (c == '.') dot = true;
+        else if (!(SDL_isalpha(c) || c == ' ' || c == '-' || c == '_')) return false;
+    }
+    return digit && dot;
+}
+
+static std::string probe_direct_chunk(const char *buf, size_t len, const std::string &id, const std::string &stem,
+                                      const std::string &title) {
+    auto find_seq = [&](const char *pat, size_t plen, size_t from) -> size_t {
+        if (plen == 0 || from + plen > len) return std::string::npos;
+        const char *it = std::search(buf + from, buf + len, pat, pat + plen);
+        return it == buf + len ? std::string::npos : (size_t)(it - buf);
+    };
+    // 1. Universal-NS2 embedded runtime table: \0<port_ver>\0<game_ver>\0<stem>\0+<Title>\0
+    if (!title.empty() && !stem.empty()) {
+        std::string t_nul = title + '\0';
+        for (size_t at = 0; (at = find_seq(t_nul.data(), t_nul.size(), at)) != std::string::npos; ++at) {
+            size_t p = at;
+            int nuls = 0;
+            while (p > 0 && buf[p - 1] == '\0' && nuls < 16) --p, ++nuls;
+            if (nuls == 0 || p < stem.size() + 2) continue;
+            if (memcmp(buf + p - stem.size(), stem.data(), stem.size()) != 0 || buf[p - stem.size() - 1] != '\0')
+                continue;
+            // walk back across <game_ver> (e.g. "1.0.0", "1.1.1")
+            size_t g_end = p - stem.size() - 1;
+            size_t g_start = g_end;
+            while (g_start > 0 && buf[g_start - 1] != '\0' && g_end - g_start < 16) --g_start;
+            if (g_start == 0 || buf[g_start - 1] != '\0' || g_end - g_start < 3) continue;
+            // walk back across <port_ver> (e.g. "Alpha 0.1.2", "0.2.1")
+            size_t v_end = g_start - 1;
+            size_t v_start = v_end;
+            while (v_start > 0 && buf[v_start - 1] != '\0' && v_end - v_start < 28) --v_start;
+            std::string ver(buf + v_start, v_end - v_start);
+            if (valid_ver(ver)) return ver;
+        }
+    }
+    // 2. MasterSword: \0<ver> (source <hex>)\0
+    if (id == "mastersword") {
+        const char *tag = " (source ";
+        size_t tlen = strlen(tag);
+        for (size_t at = 0; (at = find_seq(tag, tlen, at)) != std::string::npos; ++at) {
+            size_t h = at + tlen, h0 = h;
+            while (h < len && SDL_isxdigit((unsigned char)buf[h]) && h - h0 < 16) ++h;
+            if (h - h0 < 6 || h + 1 >= len || buf[h] != ')' || buf[h + 1] != '\0') continue;
+            size_t v_start = at;
+            while (v_start > 0 && buf[v_start - 1] != '\0' && at - v_start < 24) --v_start;
+            std::string ver(buf + v_start, at - v_start);
+            if (valid_ver(ver)) return ver;
+        }
+    }
+    // 3. MKW-THWOMP: MKW_COLOR_GAMMA\0%+.0f %%\0+<ver>\0
+    if (id == "mkw-thwomp") {
+        static const char kMkw[] = "MKW_COLOR_GAMMA\0%+.0f %%\0";
+        size_t mlen = sizeof(kMkw) - 1;
+        size_t at = find_seq(kMkw, mlen, 0);
+        if (at != std::string::npos) {
+            size_t p = at + mlen;
+            int nuls = 0;
+            while (p < len && buf[p] == '\0' && nuls < 12) ++p, ++nuls;
+            size_t e = p;
+            while (e < len && buf[e] != '\0' && e - p < 24) ++e;
+            std::string ver(buf + p, e - p);
+            if (valid_ver(ver)) return ver;
+        }
+    }
+    return {};
+}
+
+static std::string probe_file(const ProbeJob &j) {
     // every spelling: as tagged, '-' as ' ' ("Alpha-0.1.1" / "Alpha 0.1.1"), and with a leading v
     std::vector<std::pair<std::string, int>> pats;   // (text, tag index)
-    for (int t = 0; t < (int)tags.size(); ++t) {
-        std::string a = tags[t], b = tags[t];
+    for (int t = 0; t < (int)j.tags.size(); ++t) {
+        std::string a = j.tags[t], b = j.tags[t];
         std::replace(b.begin(), b.end(), '-', ' ');
         for (const std::string &s : {a, b, "v" + a})
             if (s.size() >= 3) pats.push_back({s, t});
     }
-    SDL_IOStream *io = SDL_IOFromFile(exe.c_str(), "rb");
+    SDL_IOStream *io = SDL_IOFromFile(j.exe.c_str(), "rb");
     if (!io) return {};
-    const size_t chunk = 8 << 20, keep = 64;
+    const size_t chunk = 8 << 20, keep = 256;
     std::vector<char> buf(chunk + keep);
     size_t have = 0;
-    int best = (int)tags.size();
+    int best = (int)j.tags.size();
+    std::string direct;
     auto clean = [](char c) { return !SDL_isalnum((unsigned char)c) && c != '.' && c != '-'; };
     for (;;) {
         size_t got = SDL_ReadIO(io, buf.data() + have, chunk);
         size_t len = have + got;
-        for (auto &p : pats) {
-            if (p.second >= best) continue;
-            const std::string &s = p.first;
-            auto it = buf.begin(), end = buf.begin() + len;
-            std::boyer_moore_horspool_searcher<std::string::const_iterator> bm(s.begin(), s.end());
-            while ((it = std::search(it, end, bm)) != end) {
-                size_t pos = it - buf.begin();
-                bool l = pos == 0 || clean(buf[pos - 1]);
-                bool r = pos + s.size() < len && clean(buf[pos + s.size()]);
-                if (l && r) { best = p.second; break; }
-                ++it;
+        if (direct.empty()) direct = probe_direct_chunk(buf.data(), len, j.id, j.exe_stem, j.title);
+        if (direct.empty()) {
+            for (auto &p : pats) {
+                if (p.second >= best) continue;
+                const std::string &s = p.first;
+                auto it = buf.begin(), end = buf.begin() + len;
+                std::boyer_moore_horspool_searcher<std::string::const_iterator> bm(s.begin(), s.end());
+                while ((it = std::search(it, end, bm)) != end) {
+                    size_t pos = it - buf.begin();
+                    bool l = pos == 0 || clean(buf[pos - 1]);
+                    bool r = pos + s.size() < len && clean(buf[pos + s.size()]);
+                    if (l && r) { best = p.second; break; }
+                    ++it;
+                }
             }
         }
-        if (best == 0 || got == 0) break;   // the newest tag found: nothing newer to look for
-        // keep the end of this chunk, so a tag across the boundary is still found
+        if (!direct.empty() || (best == 0 && j.id != "mastersword" && j.id != "mkw-thwomp" && j.id != "slowseparation" &&
+                                j.id != "shadowracket" && j.id != "wonderbloom") ||
+            got == 0)
+            break;
+        // keep the end of this chunk, so a tag or runtime header across the boundary is still found
         size_t k = std::min(keep, len);
         memmove(buf.data(), buf.data() + len - k, k);
         have = k;
     }
     SDL_CloseIO(io);
-    return best < (int)tags.size() ? tags[best] : std::string();
+    if (!direct.empty()) {
+        // normalize spelling to the matching GitHub tag if it corresponds to a published release
+        std::string dk = tag_key(direct);
+        for (const std::string &t : j.tags)
+            if (tag_key(t) == dk) return t;
+        return direct;
+    }
+    return best < (int)j.tags.size() ? j.tags[best] : std::string();
 }
 
 static int probe_worker(void *p) {
     auto *jobs = (std::vector<ProbeJob> *)p;
     for (const ProbeJob &j : *jobs) {
-        std::string key = probe_key(j.exe), v;
-        bool cached;
+        std::string pref = probe_prefix(j.exe);
+        std::string key = pref.empty() ? std::string() : pref + j.tag_sig;
+        std::string v;
+        bool cached = false;
         {
             std::lock_guard<std::mutex> l(g_probe_lock);
             auto it = g_probe_cache.find(key);
-            cached = it != g_probe_cache.end();
+            cached = !key.empty() && it != g_probe_cache.end();
             if (cached) v = it->second;
         }
         if (!cached && !key.empty()) {
-            v = probe_file(j.exe, j.tags);
+            v = probe_file(j);
             std::lock_guard<std::mutex> l(g_probe_lock);
+            // prune older tag-sig entries for this same exe|size|mtime
+            for (auto it = g_probe_cache.begin(); it != g_probe_cache.end();) {
+                if (it->first.rfind(pref, 0) == 0) it = g_probe_cache.erase(it);
+                else ++it;
+            }
             g_probe_cache[key] = v;
             probe_cache_save();   // after every program: a closed Sanctum keeps what it already read
         }
@@ -552,12 +733,22 @@ static int probe_worker(void *p) {
 // while the program is unchanged, whatever a later search reports
 static void apply_known_versions(const Port &p, std::vector<Install> &v) {
     if (!g_probe_cache_loaded) probe_cache_load();
+    std::string sig = port_tags_signature(p);
     for (Install &in : v) {
-        std::string key = probe_key(in.dir + "\\" + p.exe);
-        if (key.empty()) continue;
+        std::string pref = probe_prefix(in.dir + "\\" + p.exe);
+        if (pref.empty()) continue;
         std::lock_guard<std::mutex> l(g_probe_lock);
-        auto it = g_probe_cache.find(key);
-        if (it != g_probe_cache.end() && !it->second.empty()) in.version = it->second;
+        auto it = g_probe_cache.find(pref + sig);
+        if (it != g_probe_cache.end() && !it->second.empty()) {
+            in.version = it->second;
+            continue;
+        }
+        // before github_load_saved() runs, still reuse any v2 cache entry for this exact exe|size|mtime
+        for (const auto &e : g_probe_cache)
+            if (e.first.rfind(pref, 0) == 0 && !e.second.empty()) {
+                in.version = e.second;
+                break;
+            }
     }
 }
 
@@ -571,15 +762,18 @@ void version_probe_start() {
     std::vector<std::vector<ProbeJob>> per(g_ports.size());
     for (int i = 0; i < (int)g_ports.size(); ++i) {
         const Port &p = g_ports[i];
-        if (p.releases.empty()) continue;   // the tags to look for come from GitHub (or its saved copy)
         std::vector<std::string> tags;
         for (const Release &r : p.releases) tags.push_back(r.tag);
+        if (tags.empty() && p.known_tag) tags.push_back(p.known_tag);
+        std::string sig = port_tags_signature(p);
+        std::string stem = lower(p.exe);
+        if (size_t dot = stem.rfind('.'); dot != std::string::npos) stem.resize(dot);
         for (int pass = 0; pass < 3; ++pass)
             for (const Install &in : p.all) {
                 bool first = !p.installs.empty() && lower(p.installs[0].dir) == lower(in.dir);
                 if ((pass == 0) != first || (pass == 1 && in.dev) || (pass == 2 && !in.dev)) continue;
                 std::string exe = in.dir + "\\" + p.exe;
-                if (exists(exe)) per[i].push_back({i, in.dir, exe, tags});
+                if (exists(exe)) per[i].push_back({i, in.dir, exe, p.id, stem, p.title, sig, tags});
             }
     }
     auto *jobs = new std::vector<ProbeJob>;

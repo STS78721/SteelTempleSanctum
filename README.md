@@ -27,9 +27,9 @@ keep them up to date, change their settings, and start any game straight from th
 ### 🏠 A home screen that feels like a console
 
 Your ports sit in one row, ordered by what you played last, each in its own colours. The round buttons below
-open News, Get ports, Downloads, Controllers, System Settings and Power. Sanctum opens fullscreen and hides the
-mouse pointer while you use a controller. Dark and Light themes are included, and Home can take on the colours of
-the port you select.
+open Releases & news, Get ports, Downloads, Mods, Controllers, System Settings and Power. Sanctum opens fullscreen
+with smooth screen transitions and hides the mouse pointer while you use a controller. Dark and Light themes are
+included, and Home can take on the colours of the port you select.
 
 <div align="center">
 <img src="docs/screenshots/home-light.png" width="800" alt="Home in the Light theme">
@@ -48,15 +48,16 @@ report are one button away. Sanctum also counts how long you've played each port
 ### 🔎 Finds the ports you already have
 
 At start, Sanctum looks through the Setup Wizards' entries and every drive for ports already on this PC, so nothing
-is installed twice. It reads each copy's real version from its game program. If you have more than one copy, you
-pick which one Play starts.
+is installed twice. It reads each copy's real version directly from its game program. If you keep a port in an
+unusual location, you can add its folder manually in **System Settings > Ports on this PC**. If you have more than
+one copy, you pick which one Play starts.
 
 ### ⬇️ Get ports, update them, read what's new
 
 **Get ports** lists every released port: tick the ones you want and press Download. Downloads run in the background
 while you keep browsing. Each one is checked against the SHA-256 that GitHub publishes, and an update keeps a way
-back if it fails. Every port's release notes can be read on its own page, and **Releases & news** puts all of them in
-one list.
+back if it fails. Every port's release notes can be read on its own page — and you can install or roll back to any
+older release straight from the release notes pane — while **Releases & news** puts all of them in one list.
 
 <table>
 <tr>
@@ -71,8 +72,9 @@ one list.
 ### ⚙️ Each game's own settings, from the couch
 
 A port's **Settings** tab shows the same pages, options and values as the game's own in-game menu, in the port's
-colours. Changes go straight into the game's settings file, and its comments and layout stay as they are. **Y** puts
-any option back to the game's default.
+colours (including MKW-THWOMP, TotK SteelTempleBuild, SlowSeparation, ShadowRacket, dkb-BANANAS, and WonderBloom).
+Changes go straight into the game's settings file, and its comments and layout stay as they are. **Y** puts any
+option back to the game's default.
 
 <table>
 <tr>
@@ -81,15 +83,30 @@ any option back to the game's default.
 </tr>
 </table>
 
+### 🧩 Mods & storage management
+
+Open **Mods** from the Home dock or a port's **Mods** tab to see installed mod folders and toggle them on or off
+safely without deleting files. Each port's **Files & storage** tab shows its disk footprint and gives one-click
+access to its install folder, logs, required-file verification, settings backup/restore, and safe uninstall to the
+Windows Recycle Bin.
+
+<table>
+<tr>
+<td><img src="docs/screenshots/mods.png" alt="Mods manager: toggle mod folders per port"></td>
+<td><img src="docs/screenshots/files.png" alt="Files and storage tab: disk size, verify, backup, and safe uninstall"></td>
+</tr>
+</table>
+
 ### 🕹️ Any controller, your button layout
 
 Xbox, PlayStation, Switch Pro, Joy-Con and generic pads all work, and the on-screen hints show your pad's own
 buttons. Like the ports' F1 menus, **System Settings > Controllers** lets you choose the **Button layout**
-(Automatic, Nintendo with A on the right, or Xbox with A at the bottom) and the **Button icons**. Keyboard and mouse
-work everywhere too.
+(Automatic, Nintendo with A on the right, or Xbox with A at the bottom), the **Button icons**, and **Controller
+vibration** with configurable **Vibration strength** (**Low**, **Medium**, or **High**). Keyboard and mouse work
+everywhere too.
 
 <div align="center">
-<img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: Button layout and Button icons">
+<img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: Button layout, Button icons, and Controller vibration">
 </div>
 
 ### 🔊 Console menu sounds
@@ -103,12 +120,12 @@ running. **System Settings > Sound** lets you turn **Menu sounds** off at any ti
 <img src="docs/screenshots/sound.png" width="800" alt="System Settings, Sound: Menu sounds toggle and Volume">
 </div>
 
-### 👤 Your profile icon
+### 👤 Profiles & play activity
 
-Pick your icon from 60 original designs in six sets (SteelTemple, Creatures, Food, Nature, Space and Play), then
-choose one of 16 background colours. The large icon on the left previews whatever you highlight, and **A** keeps it.
-Press **Y** to name your profile: an on-screen keyboard works with a controller, or you can type straight in on a
-keyboard. Your icon then shows on Home and on every screen, and your name shows on Home.
+Create up to four local profiles, each with its own name, background colour, and icon from 60 original designs in
+six sets (SteelTemple, Creatures, Food, Nature, Space and Play). Switch profiles right from the top-left of Home,
+name them with the on-screen keyboard or your PC keyboard, and check per-game play time in the **Play activity**
+tab. The active profile name is also forwarded to supported ports automatically.
 
 <table>
 <tr>
@@ -119,9 +136,9 @@ keyboard. Your icon then shows on Home and on every screen, and your name shows 
 
 ### 🖼️ Your cover art, on your tiles
 
-Sanctum ships no game art. Point **System Settings > Cover art** at your own folder of images, and each one is
-matched to its port by name (for example `Mario Kart World.png`). The tiles update by themselves when you add or
-change a picture. A port without a cover shows its colours and short name, as in the screenshots here.
+Sanctum ships no game art. Point **System Settings > Cover art** at your own folder of images (including subfolders),
+and each one is matched to its port by name (for example `Mario Kart World.png`). The tiles update by themselves when
+you add or change a picture. A port without a cover shows its colours and short name, as in the screenshots here.
 
 ---
 
@@ -147,6 +164,7 @@ New releases of these ports show up in Sanctum by themselves. Press **+** (Menu 
    From then on Sanctum updates itself: a new version downloads in the background and goes in when you close it.
 3. Open **Get ports** to download more. A port that builds its game from your files asks for them on its first
    start, through **Set up** on its page.
+4. Optional: in **System Settings > About**, add a Desktop or Start Menu shortcut, or turn on **Start with Windows**.
 
 > [!IMPORTANT]
 > Sanctum and the ports never include or download game files. Every port runs from **your own** legally dumped copy

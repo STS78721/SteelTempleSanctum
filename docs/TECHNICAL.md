@@ -162,6 +162,8 @@ no game started; the README screenshots are taken this way). `tools/build.py --n
 | `src/covers.cpp` | cover art from the player's folder, decoded on a worker thread |
 | `src/launch.cpp` | starting a port and coming back when it ends |
 | `src/sound.cpp` | procedural Switch 2-style UI sounds using SDL3 audio |
+| `src/mods.cpp` | per-port mod manager (enable/disable via `mods\.disabled`) |
+| `src/platform.cpp` | Windows Desktop/Start Menu shortcuts, startup registry, Recycle Bin delete, folder size |
 | `src/port_settings.cpp` | a port's own settings page, and the ini editor that keeps the file as it is |
 | `tools/package.py` | the release zip, `dist/SteelTemple-Sanctum-<version>-Portable.zip` (version from `src/selfupdate.h`) |
 | `tools/extract_settings.py` | each port's settings list from its source tree, into `assets/settings/` |

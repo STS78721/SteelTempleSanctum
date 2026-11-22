@@ -135,6 +135,8 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
             if (eq == std::string::npos || kv.substr(eq + 1) == "Other") continue;
             SDL_SetEnvironmentVariable(env, kv.substr(0, eq).c_str(), kv.substr(eq + 1).c_str(), force);
         }
+        if (pr->profile_env && !cfg().profile.empty())
+            SDL_SetEnvironmentVariable(env, pr->profile_env, cfg().profile.c_str(), false);
     }
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args.data());

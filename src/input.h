@@ -16,4 +16,8 @@ enum FacePos { FACE_BOTTOM, FACE_RIGHT, FACE_LEFT, FACE_TOP };
 FacePos nav_position(Nav n);   // where the button for A / B / X / Y sits on the pad in use
 void input_refresh_style();    // after Button icons changes
 
+// Subtle Switch-style controller vibration (no-op when keyboard/mouse is active or rumble is disabled)
+enum Haptic { HAP_TICK, HAP_OK, HAP_BACK, HAP_LAUNCH, HAP_ERROR };
+void input_rumble(Haptic h, bool force = false);
+
 }  // namespace sanctum

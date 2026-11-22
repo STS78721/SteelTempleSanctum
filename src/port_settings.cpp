@@ -150,6 +150,8 @@ static std::string ini_path(int port) {
     return in && s ? in->dir + "\\" + s->ini : std::string();
 }
 
+std::string port_settings_ini_path(int port) { return ini_path(port); }
+
 int port_settings_changed(int port) {
     const PortSettings *s = port_settings(ports()[port].id);
     Ini ini;

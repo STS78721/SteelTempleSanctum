@@ -44,16 +44,52 @@ static void hold(Nav n, bool down) {
 }
 
 static PadStyle g_pad_native = PAD_GENERIC;   // the pad in use, before the Button icons setting
+static SDL_JoystickID g_pad_id = 0;           // the last pad used, for subtle haptics
+static Sint64 g_last_rumble_ms = -1000;
 
 static void use_pad(SDL_JoystickID id) {
     SDL_Gamepad *pad = SDL_GetGamepadFromID(id);
     if (!pad) return;
     if (cfg().hide_cursor && SDL_CursorVisible()) SDL_HideCursor();
+    g_pad_id = id;
     g_pad_native = style_of(pad);
     static const PadStyle icons[] = {PAD_GENERIC, PAD_NINTENDO, PAD_XBOX, PAD_PLAYSTATION};
     app().pad = cfg().button_icons ? icons[cfg().button_icons % 4] : g_pad_native;   // Settings > Controllers
     const char *n = SDL_GetGamepadName(pad);
     app().pad_name = n ? n : "Controller";
+}
+
+void input_rumble(Haptic h, bool force) {
+    if (!cfg().rumble || demo_mode()) return;
+    if (!force && app().pad == PAD_KEYBOARD) return;
+    SDL_Gamepad *pad = g_pad_id ? SDL_GetGamepadFromID(g_pad_id) : nullptr;
+    if (!pad && force) {
+        int cnt = 0;
+        if (SDL_JoystickID *ids = SDL_GetGamepads(&cnt)) {
+            for (int i = 0; i < cnt && !pad; ++i) pad = SDL_GetGamepadFromID(ids[i]);
+            SDL_free(ids);
+        }
+    }
+    if (!pad) return;
+    Sint64 now = (Sint64)SDL_GetTicks();
+    if (!force && now - g_last_rumble_ms < 25) return;
+    g_last_rumble_ms = now;
+    Uint16 lo = 0, hi = 0;
+    Uint32 ms = 16;
+    switch (h) {
+    case HAP_TICK:   lo = 0x0000; hi = 0x1E00; ms = 16; break;
+    case HAP_OK:     lo = 0x1800; hi = 0x3800; ms = 24; break;
+    case HAP_BACK:   lo = 0x2400; hi = 0x1000; ms = 20; break;
+    case HAP_LAUNCH: lo = 0x4000; hi = 0x5000; ms = 55; break;
+    case HAP_ERROR:  lo = 0x3000; hi = 0x1800; ms = 28; break;
+    }
+    static const float kScale[] = {0.55f, 1.0f, 1.85f};
+    int st = SDL_clamp(cfg().rumble_strength, 0, 2);
+    float sc = kScale[st];
+    lo = (Uint16)SDL_clamp((int)(lo * sc), 0, 0xFFFF);
+    hi = (Uint16)SDL_clamp((int)(hi * sc), 0, 0xFFFF);
+    if (st == 2) ms += 6;
+    SDL_RumbleGamepad(pad, lo, hi, ms);
 }
 
 void input_refresh_style() {   // after Button icons changes
@@ -116,6 +152,7 @@ void input_event(const SDL_Event &e) {
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
         if (SDL_Gamepad *g = SDL_GetGamepadFromID(e.gdevice.which)) SDL_CloseGamepad(g);
+        if (g_pad_id == e.gdevice.which) g_pad_id = 0;
         a.pad = PAD_KEYBOARD;
         a.pad_name.clear();
         break;

@@ -6,19 +6,43 @@
 
 #include "app.h"
 #include "avatars.h"
+#include "catalog.h"
 #include "config.h"
 #include "draw.h"
+#include "launch.h"
 #include "sound.h"
 
 namespace sanctum {
 
-static int g_tab = 0, g_sel = 0;
+static int g_tab = 0, g_sel = 0, g_act_sel = 0;
 static float g_tab_x = 0;
+static double g_del_armed = -10;
 
-static int tab_count() { return (int)avatar_categories().size() + 1; }   // the categories, then Colour
-static bool colour_tab() { return g_tab == tab_count() - 1; }
+static int tab_count() { return (int)avatar_categories().size() + 2; }   // categories, Colour, Activity
+static bool colour_tab() { return g_tab == (int)avatar_categories().size(); }
+static bool activity_tab() { return g_tab == (int)avatar_categories().size() + 1; }
 static const char *tab_name(int t) {
-    return t < (int)avatar_categories().size() ? avatar_categories()[t].c_str() : "Colour";
+    int nc = (int)avatar_categories().size();
+    return t < nc ? avatar_categories()[t].c_str() : t == nc ? "Colour" : "Activity";
+}
+
+static std::string fmt_duration(long long secs) {
+    if (secs <= 0) return "0 min";
+    if (secs < 60) return "under 1 min";
+    long long m = secs / 60;
+    if (m < 60) return std::to_string(m) + " min";
+    return std::to_string(m / 60) + " h " + std::to_string(m % 60) + " min";
+}
+
+static long long total_playtime_seconds(int *ports_played = nullptr) {
+    long long tot = 0;
+    int cnt = 0;
+    for (int i = 0; i < (int)ports().size(); ++i) {
+        long long s = played_seconds(i);
+        if (s > 0) tot += s, ++cnt;
+    }
+    if (ports_played) *ports_played = cnt;
+    return tot;
 }
 
 // the icons of a category, as atlas indices
@@ -30,12 +54,14 @@ static std::vector<int> icons_of(int t) {
     return out;
 }
 
-static int items() { return colour_tab() ? (int)avatar_colours().size() : (int)icons_of(g_tab).size(); }
+static int items() { return activity_tab() ? 0 : colour_tab() ? (int)avatar_colours().size() : (int)icons_of(g_tab).size(); }
 static int cols() { return colour_tab() ? 8 : 6; }
 
 // where the selection should start on a page: on the player's own choice when it is there
 static void land() {
     g_sel = 0;
+    g_act_sel = 0;
+    if (activity_tab()) return;
     if (colour_tab()) { g_sel = cfg().avatar_bg; return; }
     auto v = icons_of(g_tab);
     int mine = avatar_find(cfg().avatar);
@@ -45,6 +71,7 @@ static void land() {
 
 void profile_open() {
     g_tab = 0;
+    g_del_armed = -10;
     int mine = avatar_find(cfg().avatar);
     for (int t = 0; mine >= 0 && t < (int)avatar_categories().size(); ++t)
         if (avatar_categories()[t] == avatar_category(mine)) g_tab = t;
@@ -53,6 +80,7 @@ void profile_open() {
 }
 
 static void choose() {
+    if (activity_tab()) return;
     if (colour_tab()) {
         cfg().avatar_bg = g_sel;
         toast(std::string("Background: ") + avatar_colours()[g_sel].name);
@@ -102,7 +130,7 @@ static void name_add(const std::string &utf8) {
         unsigned char c = utf8[i];
         int len = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
         unsigned cp = len == 1 ? c : len == 2 ? ((c & 0x1F) << 6) | (utf8[i + 1] & 0x3F) : 0xFFFF;
-        if (cp >= 0x20 && cp != 0x7F && cp <= 0xFF && name_len(g_name) < kMaxName) g_name += utf8.substr(i, len);
+        if (cp >= 0x20 && cp != 0x7F && cp != '|' && cp <= 0xFF && name_len(g_name) < kMaxName) g_name += utf8.substr(i, len);
         i += len;
     }
 }
@@ -234,20 +262,68 @@ void profile_frame() {
         a.nav = NAV_NONE, a.clicked = a.mouse_moved = false;
     }
 
+    // build play activity list (sorted by most played)
+    std::vector<std::pair<int, long long>> act;
+    for (int i = 0; i < (int)ports().size(); ++i) {
+        long long s = played_seconds(i);
+        if (s > 0) act.push_back({i, s});
+    }
+    std::stable_sort(act.begin(), act.end(), [](const auto &x, const auto &y) { return x.second > y.second; });
+    if (g_act_sel >= (int)act.size()) g_act_sel = std::max(0, (int)act.size() - 1);
+
     switch (a.nav) {
     case NAV_Y: kb_open(); break;
+    case NAV_X:
+        if (cfg().profiles.size() > 1) {
+            if (a.now - g_del_armed < 4.0) {
+                g_del_armed = -10;
+                if (profile_delete(cfg().active_profile)) {
+                    sound_play(SFX_BACK);
+                    toast("Profile removed");
+                    go_back(true);
+                    return;
+                }
+            } else {
+                g_del_armed = a.now;
+                sound_play(SFX_ERROR);
+                toast("Press X again to delete \"" + cfg().profile + "\"", 4);
+            }
+        }
+        break;
     case NAV_B: go_back(); return;
     case NAV_L: g_tab = (g_tab + tab_count() - 1) % tab_count(); land(); sound_play(SFX_TAB); break;
     case NAV_R: g_tab = (g_tab + 1) % tab_count(); land(); sound_play(SFX_TAB); break;
-    case NAV_LEFT: if (g_sel > 0) { g_sel--; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
-    case NAV_RIGHT: if (g_sel < n - 1) { g_sel++; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
-    case NAV_UP: if (g_sel >= c) { g_sel -= c; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
-    case NAV_DOWN:
-        if (g_sel + c < n) { g_sel += c; sound_play(SFX_MOVE); }
-        else if (g_sel / c < (n - 1) / c) { g_sel = n - 1; sound_play(SFX_MOVE); }
-        else sound_play(SFX_EDGE);
+    case NAV_LEFT:
+        if (!activity_tab()) { if (g_sel > 0) { g_sel--; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); }
         break;
-    case NAV_A: choose(); break;
+    case NAV_RIGHT:
+        if (!activity_tab()) { if (g_sel < n - 1) { g_sel++; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); }
+        break;
+    case NAV_UP:
+        if (activity_tab()) {
+            if (g_act_sel > 0) { g_act_sel--; sound_play(SFX_MOVE); }
+            else if (!act.empty()) sound_play(SFX_EDGE);
+        } else {
+            if (g_sel >= c) { g_sel -= c; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE);
+        }
+        break;
+    case NAV_DOWN:
+        if (activity_tab()) {
+            if (g_act_sel < (int)act.size() - 1) { g_act_sel++; sound_play(SFX_MOVE); }
+            else if (!act.empty()) sound_play(SFX_EDGE);
+        } else {
+            if (g_sel + c < n) { g_sel += c; sound_play(SFX_MOVE); }
+            else if (g_sel / c < (n - 1) / c) { g_sel = n - 1; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        }
+        break;
+    case NAV_A:
+        if (activity_tab()) {
+            if (!act.empty()) { a.game = act[g_act_sel].first; go(SCR_GAME); return; }
+        } else {
+            choose();
+        }
+        break;
     default: break;
     }
     n = items(), c = cols();
@@ -257,7 +333,7 @@ void profile_frame() {
     int show = avatar_find(cfg().avatar), bg = cfg().avatar_bg;
     std::vector<int> v = icons_of(g_tab);
     if (colour_tab()) bg = g_sel;
-    else if (g_sel < (int)v.size()) show = v[g_sel];
+    else if (!activity_tab() && g_sel < (int)v.size()) show = v[g_sel];
 
     background(avatar_colours()[bg].col);
     status_bar();
@@ -265,70 +341,113 @@ void profile_frame() {
 
     // left: the preview
     rect(96, 140, 340, 496, p.panel, 22);
-    avatar_draw(show, bg, 266, 300, 112);
-    text(266, 436, 26, p.text, fit(26, cfg().profile, 300).c_str(), 0.5f);
-    if (!g_kb && a.clicked && hover(116, 426, 300, 40)) kb_open();   // click the name to change it
+    avatar_draw(show, bg, 266, 294, 110);
+    text(266, 426, 26, p.text, fit(26, cfg().profile, 300).c_str(), 0.5f);
+    if (!g_kb && a.clicked && hover(116, 416, 300, 40)) kb_open();   // click the name to change it
+    std::string what = (show >= 0 ? avatar_name(show) : std::string("No icon")) + "  ·  " + avatar_colours()[bg].name;
+    text(266, 464, 15, p.soft, what.c_str(), 0.5f);
+    int played_n = 0;
+    long long tot_secs = total_playtime_seconds(&played_n);
+    if (tot_secs > 0)
+        text(266, 490, 14, p.dim, ("Total played: " + fmt_duration(tot_secs)).c_str(), 0.5f);
     {
         float gw = glyph_w(NAV_Y, 22), lw = text_w(15, "Change name"), x = 266 - (gw + 8 + lw) / 2;
-        glyph(NAV_Y, x, 520, 22);
-        text(x + gw + 8, 522, 15, p.soft, "Change name");
+        glyph(NAV_Y, x, 530, 22);
+        text(x + gw + 8, 532, 15, p.soft, "Change name");
     }
-    std::string what = (show >= 0 ? avatar_name(show) : std::string("No icon")) + "  ·  " + avatar_colours()[bg].name;
-    text(266, 474, 16, p.soft, what.c_str(), 0.5f);
     bool same = show == avatar_find(cfg().avatar) && bg == cfg().avatar_bg;
-    text(266, 580, 14, p.dim, same ? "Your icon on Home and every screen" : "A keeps this one", 0.5f);
+    text(266, 584, 14, p.dim, same ? "Your icon on Home and every screen" : "A keeps this one", 0.5f);
 
     // right: the pages
     float x0 = 486, tx = x0;
     for (int t = 0; t < tab_count(); ++t) {
-        float w = text_w(17, tab_name(t)) + 32;
+        float w = text_w(16, tab_name(t)) + 24;
         if (a.clicked && hover(tx, 140, w, 40)) { if (g_tab != t) sound_play(SFX_TAB); g_tab = t; land(); }
-        text(tx + 16, 148, 17, t == g_tab ? p.text : p.dim, tab_name(t));
+        text(tx + 12, 149, 16, t == g_tab ? p.text : p.dim, tab_name(t));
         if (t == g_tab) g_tab_x = ease(g_tab_x ? g_tab_x : tx, tx, 20);
         tx += w;
     }
     rect(x0, 182, 750, 1, p.line);
-    rect(g_tab_x + 12, 179, text_w(17, tab_name(g_tab)) + 8, 4, avatar_colours()[bg].col, 2);
+    rect(g_tab_x + 8, 179, text_w(16, tab_name(g_tab)) + 8, 4, avatar_colours()[bg].col, 2);
 
-    n = items(), c = cols();
-    v = icons_of(g_tab);
-    float cell = colour_tab() ? 92 : 122, r = colour_tab() ? 36 : 50;
-    float gx = x0 + (750 - c * cell) / 2, gy = 210;
-    int mine_icon = avatar_find(cfg().avatar);
-    for (int i = 0; i < n; ++i) {
-        float cx = gx + (i % c) * cell + cell / 2, cy = gy + (i / c) * cell + cell / 2;
-        if (hover(cx - r, cy - r, 2 * r, 2 * r)) {
-            if (a.mouse_moved && !a.clicked && g_sel != i) { g_sel = i; sound_play(SFX_MOVE); }
-            if (a.clicked) { g_sel = i; choose(); }
-        }
-        bool focused = i == g_sel;
-        float rr = r * (focused ? 1.06f : 1.0f);
-        bool chosen;
-        if (colour_tab()) {
-            avatar_draw(mine_icon, i, cx, cy, rr);
-            chosen = i == cfg().avatar_bg;
+    if (activity_tab()) {
+        rect(x0, 202, 750, 58, p.panel, 14);
+        text(x0 + 20, 214, 18, p.text, "Play activity");
+        std::string sum = tot_secs > 0 ? (fmt_duration(tot_secs) + " across " + std::to_string(played_n) + (played_n == 1 ? " port" : " ports"))
+                                       : "No playtime recorded yet";
+        text(x0 + 730, 222, 16, tot_secs > 0 ? p.accent_text : p.soft, sum.c_str(), 1);
+        text(x0 + 20, 238, 13, p.dim, "Tracked automatically whenever you play a port from Sanctum");
+        if (act.empty()) {
+            text(x0 + 375, 340, 17, p.soft, "Start any port from Sanctum to see your play history here.", 0.5f);
         } else {
-            avatar_draw(v[i], cfg().avatar_bg, cx, cy, rr);
-            chosen = v[i] == mine_icon;
+            const int kVis = 5;
+            int top = std::max(0, std::min(g_act_sel - 2, (int)act.size() - kVis));
+            long long top_s = act[0].second;
+            for (int i = top; i < (int)act.size() && i < top + kVis; ++i) {
+                int pi = act[i].first;
+                long long secs = act[i].second;
+                const Port &port = ports()[pi];
+                float y = 276 + (i - top) * 70;
+                if (hover(x0, y, 750, 62)) {
+                    if (a.mouse_moved && !a.clicked && g_act_sel != i) { g_act_sel = i; sound_play(SFX_MOVE); }
+                    if (a.clicked) { a.game = pi; go(SCR_GAME); return; }
+                }
+                rect(x0, y, 750, 62, p.panel, 12);
+                tile(port, x0 + 8, y + 8, 46, 1, false);
+                text(x0 + 68, y + 8, 16, p.text, fit(16, port.title, 420).c_str());
+                text(x0 + 734, y + 10, 15, port.colours.accent, fmt_duration(secs).c_str(), 1);
+                text(x0 + 68, y + 32, 13, p.dim, fit(13, played_text(pi), 380).c_str());
+                float frac = top_s > 0 ? (float)secs / (float)top_s : 0.0f;
+                rect(x0 + 460, y + 40, 274, 6, p.line, 3);
+                rect(x0 + 460, y + 40, std::max(6.0f, 274 * frac), 6, port.colours.accent, 3);
+                if (i == g_act_sel) focus_ring(x0, y, 750, 62, 12, 3);
+            }
         }
-        if (chosen) {   // the one in use: a tick at the lower right
-            circle(cx + r * 0.72f, cy + r * 0.72f, 13, p.bg);
-            circle(cx + r * 0.72f, cy + r * 0.72f, 11, p.ok);
-            icon(IC_CHECK, cx + r * 0.72f, cy + r * 0.72f, 14, IM_COL32_WHITE);
+    } else {
+        n = items(), c = cols();
+        v = icons_of(g_tab);
+        float cell = colour_tab() ? 92 : 122, r = colour_tab() ? 36 : 50;
+        float gx = x0 + (750 - c * cell) / 2, gy = 210;
+        int mine_icon = avatar_find(cfg().avatar);
+        for (int i = 0; i < n; ++i) {
+            float cx = gx + (i % c) * cell + cell / 2, cy = gy + (i / c) * cell + cell / 2;
+            if (hover(cx - r, cy - r, 2 * r, 2 * r)) {
+                if (a.mouse_moved && !a.clicked && g_sel != i) { g_sel = i; sound_play(SFX_MOVE); }
+                if (a.clicked) { g_sel = i; choose(); }
+            }
+            bool focused = i == g_sel;
+            float rr = r * (focused ? 1.06f : 1.0f);
+            bool chosen;
+            if (colour_tab()) {
+                avatar_draw(mine_icon, i, cx, cy, rr);
+                chosen = i == cfg().avatar_bg;
+            } else {
+                avatar_draw(v[i], cfg().avatar_bg, cx, cy, rr);
+                chosen = v[i] == mine_icon;
+            }
+            if (chosen) {   // the one in use: a tick at the lower right
+                circle(cx + r * 0.72f, cy + r * 0.72f, 13, p.bg);
+                circle(cx + r * 0.72f, cy + r * 0.72f, 11, p.ok);
+                icon(IC_CHECK, cx + r * 0.72f, cy + r * 0.72f, 14, IM_COL32_WHITE);
+            }
+            if (focused) focus_ring(cx - rr, cy - rr, 2 * rr, 2 * rr, rr, 5);
         }
-        if (focused) focus_ring(cx - rr, cy - rr, 2 * rr, 2 * rr, rr, 5);
+        if (!colour_tab() && n)
+            text(x0 + 375, 618, 15, p.soft, (std::to_string(n) + " icons  ·  " + std::to_string(avatar_count()) +
+                                             " in all, on " + std::to_string(avatar_colours().size()) + " colours").c_str(), 0.5f);
+        if (!avatar_count()) text(x0 + 375, 300, 17, p.soft, "The icons are missing: assets\\avatars.png", 0.5f);
     }
-    if (!colour_tab() && n)
-        text(x0 + 375, 618, 15, p.soft, (std::to_string(n) + " icons  ·  " + std::to_string(avatar_count()) +
-                                         " in all, on " + std::to_string(avatar_colours().size()) + " colours").c_str(), 0.5f);
-    if (!avatar_count()) text(x0 + 375, 300, 17, p.soft, "The icons are missing: assets\\avatars.png", 0.5f);
 
     if (g_kb) {   // the keyboard over the page, with this frame's input
         a.nav = kb_nav, a.clicked = kb_click, a.mouse_moved = kb_moved;
         kb_frame();
         return;
     }
-    hint_bar({{NAV_A, "Choose"}, {NAV_Y, "Name"}, {NAV_L, "Page"}, {NAV_B, "Back"}});
+    bool can_del = cfg().profiles.size() > 1;
+    if (activity_tab() && can_del) hint_bar({{NAV_A, "Open port"}, {NAV_X, "Delete profile"}, {NAV_Y, "Name"}, {NAV_L, "Page"}, {NAV_B, "Back"}});
+    else if (activity_tab()) hint_bar({{NAV_A, "Open port"}, {NAV_Y, "Name"}, {NAV_L, "Page"}, {NAV_B, "Back"}});
+    else if (can_del) hint_bar({{NAV_A, "Choose"}, {NAV_X, "Delete profile"}, {NAV_Y, "Name"}, {NAV_L, "Page"}, {NAV_B, "Back"}});
+    else hint_bar({{NAV_A, "Choose"}, {NAV_Y, "Name"}, {NAV_L, "Page"}, {NAV_B, "Back"}});
 }
 
 }  // namespace sanctum

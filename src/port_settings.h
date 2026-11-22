@@ -33,6 +33,7 @@ struct PortSettings {
 const PortSettings *port_settings(const char *port_id);   // nullptr when Sanctum has no list for the port
 void port_settings_open(int port);                         // the full-screen page (SCR_PORT_SETTINGS)
 int port_settings_changed(int port);                       // how many of its settings the player has set
+std::string port_settings_ini_path(int port);              // path to the port's active ini file, or ""
 
 // a small ini editor that keeps the file as it is
 struct Ini {

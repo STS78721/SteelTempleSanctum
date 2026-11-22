@@ -57,6 +57,39 @@ static std::string lower(const char *s) {
     return o;
 }
 
+struct ImgFile {
+    std::string rel;    // relative to cover_dir, e.g. "Nintendo Switch 2 Icons\\Fast Fusion.png"
+    std::string name;   // file basename only, e.g. "Fast Fusion.png"
+    int depth = 0;
+};
+
+static void collect_images_walk(const std::string &root, const std::string &rel, int depth, int max_depth,
+                                std::vector<ImgFile> &out) {
+    std::string dir = rel.empty() ? root : root + "\\" + rel;
+    int count = 0;
+    char **entries = SDL_GlobDirectory((dir + "\\").c_str(), "*", SDL_GLOB_CASEINSENSITIVE, &count);
+    for (int i = 0; entries && i < count; ++i) {
+        const char *en = entries[i];
+        if (!en || !en[0] || en[0] == '.' || en[0] == '$') continue;
+        std::string sub_rel = rel.empty() ? std::string(en) : rel + "\\" + en;
+        std::string full = root + "\\" + sub_rel;
+        SDL_PathInfo info{};
+        if (!SDL_GetPathInfo(full.c_str(), &info)) continue;
+        if (info.type == SDL_PATHTYPE_DIRECTORY) {
+            if (depth < max_depth) collect_images_walk(root, sub_rel, depth + 1, max_depth, out);
+        } else if (info.type == SDL_PATHTYPE_FILE && is_image(lower(en))) {
+            out.push_back({sub_rel, en, depth});
+        }
+    }
+    SDL_free(entries);
+}
+
+static std::vector<ImgFile> collect_images(const std::string &dir, int max_depth = 3) {
+    std::vector<ImgFile> out;
+    if (!dir.empty()) collect_images_walk(dir, "", 0, max_depth, out);
+    return out;
+}
+
 // How well a file's name fits a port: 3 its full title, 2 the port's own name, 1 the short name on its own;
 // 0 no match. The short name must be the whole name ("OoT.png"), so "ff" never matches "Diff.png".
 static int score(const Port &p, const std::string &file) {
@@ -76,26 +109,28 @@ struct Job {
 
 static int worker(void *p) {
     Job *job = (Job *)p;
-    int count = 0;
-    char **files = SDL_GlobDirectory(job->dir.c_str(), "*", SDL_GLOB_CASEINSENSITIVE, &count);
+    std::vector<ImgFile> files = collect_images(job->dir, 3);
     std::set<std::string> matched;
     for (Port &port : ports()) {
-        std::string best;
+        const ImgFile *best = nullptr;
         int best_score = 0;
-        for (int i = 0; files && i < count; ++i) {
-            if (!is_image(lower(files[i]))) continue;
-            int s = score(port, files[i]);
-            if (s > best_score || (s && s == best_score && SDL_strlen(files[i]) < best.size()))
-                best = files[i], best_score = s;
+        for (const ImgFile &f : files) {
+            int s = score(port, f.name);
+            if (!s) continue;
+            bool better = s > best_score ||
+                          (s == best_score && best &&
+                           (f.name.size() < best->name.size() ||
+                            (f.name.size() == best->name.size() && f.depth < best->depth)));
+            if (better) best = &f, best_score = s;
         }
-        if (best.empty()) continue;
+        if (!best) continue;
         int w, h, n;
-        unsigned char *px = stbi_load((job->dir + "\\" + best).c_str(), &w, &h, &n, 4);
+        unsigned char *px = stbi_load((job->dir + "\\" + best->rel).c_str(), &w, &h, &n, 4);
         if (!px) continue;
         matched.insert(port.id);
         Decoded d{port.id, w, h, {}};
-        // halve big covers (1024 -> 512): sharp at tile size, a quarter of the memory, uploads in no time
-        int f = (w >= 1024 && h >= 1024) ? 2 : 1;
+        // shrink huge covers to ~512px: sharp at tile size, a fraction of the memory, uploads in no time
+        int f = (w >= 2048 && h >= 2048) ? 4 : (w >= 1024 && h >= 1024) ? 2 : 1;
         d.w = w / f, d.h = h / f;
         d.rgba.resize((size_t)d.w * d.h * 4);
         for (int y = 0; y < d.h; ++y)
@@ -110,7 +145,6 @@ static int worker(void *p) {
         std::lock_guard<std::mutex> l(g_lock);
         if (job->generation == g_generation) g_ready.push_back(std::move(d));
     }
-    SDL_free(files);
     {
         std::lock_guard<std::mutex> l(g_lock);
         if (job->generation == g_generation) {
@@ -124,19 +158,15 @@ static int worker(void *p) {
     return 0;
 }
 
-// the pictures in the folder, as one string: changes when one is added, removed, renamed or replaced
+// the pictures in the folder (and subfolders), as one string: changes when one is added, removed, renamed or replaced
 static std::string signature(const std::string &dir) {
-    int count = 0;
-    char **files = SDL_GlobDirectory(dir.c_str(), "*", SDL_GLOB_CASEINSENSITIVE, &count);
     std::string sig;
-    for (int i = 0; files && i < count; ++i) {
-        if (!is_image(lower(files[i]))) continue;
-        SDL_PathInfo info;
-        if (!SDL_GetPathInfo((dir + "\\" + files[i]).c_str(), &info)) continue;
-        sig += files[i];
+    for (const ImgFile &f : collect_images(dir, 3)) {
+        SDL_PathInfo info{};
+        if (!SDL_GetPathInfo((dir + "\\" + f.rel).c_str(), &info)) continue;
+        sig += f.rel;
         sig += '|' + std::to_string(info.size) + '|' + std::to_string(info.modify_time) + '\n';
     }
-    SDL_free(files);
     return sig;
 }
 
@@ -207,11 +237,7 @@ SDL_Texture *cover(const char *id) {
 int covers_matched() { return g_matched; }
 
 int count_pngs(const std::string &dir) {
-    int count = 0, n = 0;
-    char **f = SDL_GlobDirectory(dir.c_str(), "*", SDL_GLOB_CASEINSENSITIVE, &count);
-    for (int i = 0; f && i < count; ++i) n += is_image(lower(f[i]));
-    SDL_free(f);
-    return n;
+    return (int)collect_images(dir, 3).size();
 }
 
 }  // namespace sanctum

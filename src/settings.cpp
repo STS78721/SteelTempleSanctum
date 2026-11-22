@@ -9,6 +9,7 @@
 #include "draw.h"
 #include "input.h"
 #include "install.h"
+#include "platform.h"
 #include "selfupdate.h"
 #include "sound.h"
 
@@ -18,15 +19,18 @@ namespace sanctum {
 enum Cat { CAT_DISPLAY, CAT_SOUND, CAT_THEMES, CAT_COVERS, CAT_LIBRARY, CAT_CONTROLLERS, CAT_ABOUT, CAT_N };
 static const char *kCatName[] = {"Display", "Sound", "Themes", "Cover art", "Ports on this PC", "Controllers", "About Sanctum"};
 static const Icon kCatIcon[] = {IC_DISPLAY, IC_SOUND, IC_PALETTE, IC_FOLDER, IC_LIBRARY, IC_PAD, IC_INFO};
-static int g_cat = 0, g_row = 0;
+static int g_cat = 0, g_row = 0, g_row_top = 0;
 static bool g_in_rows = false;
+static bool g_startup_loaded = false, g_startup_on = false;
 
 struct Row {
     std::string label, value;
     int id;          // what A does
     bool toggle = false, on = false;
 };
-enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_SOUNDS, R_SOUND_VOL, R_FOLDER, R_RELOAD, R_SEARCH, R_DEV, R_LIBDIR, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_UPDATE, R_AUTO_UPDATE, R_INFO };
+enum { R_THEME, R_FOLLOW, R_TILES, R_FULLSCREEN, R_HIDE_CURSOR, R_SOUNDS, R_SOUND_VOL, R_FOLDER, R_RELOAD, R_SEARCH,
+       R_DEV, R_LIBDIR, R_ADD_PORT, R_PORT, R_PADS, R_LAYOUT, R_ICONS, R_RUMBLE, R_RUMBLE_STR, R_UPDATE, R_AUTO_UPDATE,
+       R_STARTUP, R_SHORTCUT_DESKTOP, R_SHORTCUT_START, R_INFO };
 
 static std::vector<Row> rows_of(int cat) {
     std::vector<Row> r;
@@ -63,6 +67,7 @@ static std::vector<Row> rows_of(int cat) {
     case CAT_LIBRARY:
         r.push_back({scan_running() ? "Searching this PC..." : "Search this PC again", "", R_SEARCH});
         r.push_back({"Install new ports into", shown_path(library_dir()), R_LIBDIR});
+        r.push_back({"Add a port folder manually", "Choose...", R_ADD_PORT});
         r.push_back({"Include copies in build and backup folders", "", R_DEV, true, !c.hide_dev});
         for (auto &p : ports()) {
             std::string dir = p.installs.empty() ? "" : shown_path(p.installs[0].dir, p.title);
@@ -75,13 +80,17 @@ static std::vector<Row> rows_of(int cat) {
     case CAT_CONTROLLERS: {
         static const char *const layouts[] = {"Automatic", "Nintendo (A right)", "Xbox (A bottom)"};
         static const char *const icons[] = {"Automatic", "Nintendo", "Xbox", "PlayStation"};
+        static const char *const strengths[] = {"Low", "Medium", "High"};
         r.push_back({"Button layout", layouts[c.pad_layout % 3], R_LAYOUT});
         r.push_back({"Button icons", icons[c.button_icons % 4], R_ICONS});
+        r.push_back({"Controller vibration", "", R_RUMBLE, true, c.rumble});
+        r.push_back({"Vibration strength", strengths[c.rumble_strength % 3], R_RUMBLE_STR});
         r.push_back({"Test controllers", "", R_PADS});
         r.push_back({"Automatic layout", "A confirms where each pad prints it", R_INFO});
         break;
     }
     case CAT_ABOUT:
+        if (!g_startup_loaded) { g_startup_loaded = true; g_startup_on = demo_mode() ? false : startup_is_enabled(); }
         r.push_back({"SteelTemple Sanctum", std::string("Version ") + sanctum_version(), R_INFO});
         {
             std::string t = self_update_tag(), v;
@@ -97,6 +106,9 @@ static std::vector<Row> rows_of(int cat) {
             r.push_back({"Updates", demo_mode() ? "Up to date" : v, R_UPDATE});
         }
         r.push_back({"Update Sanctum automatically", "", R_AUTO_UPDATE, true, c.auto_update});
+        r.push_back({"Start Sanctum with Windows", "", R_STARTUP, true, g_startup_on});
+        r.push_back({"Desktop shortcut", "Create / repair", R_SHORTCUT_DESKTOP});
+        r.push_back({"Start Menu shortcut", "Create / repair", R_SHORTCUT_START});
         r.push_back({"Settings folder", demo_mode() ? "%APPDATA%\\SteelTemple\\Sanctum" : config_dir(), R_INFO});
         r.push_back({"Game files", "Never downloaded or shipped: every port uses your own copy", R_INFO});
         break;
@@ -127,12 +139,23 @@ static void act(const Row &r) {
     case R_SEARCH: scan_start(); sound_play(SFX_OK); return;
     case R_DEV: c.hide_dev = !c.hide_dev; catalog_refilter(); sound_play(!c.hide_dev ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
     case R_LIBDIR: folder_open(library_dir(), FOLDER_LIBRARY); return;
+    case R_ADD_PORT: folder_open("", FOLDER_ADD_PORT); return;
     case R_PORT: {
         for (int i = 0; i < (int)ports().size(); ++i)
             if (r.label == ports()[i].title) { app().game = i; go(SCR_GAME); }
         return;
     }
     case R_PADS: go(SCR_CONTROLLERS); return;
+    case R_RUMBLE:
+        c.rumble = !c.rumble;
+        sound_play(c.rumble ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        if (c.rumble) input_rumble(HAP_OK, true);
+        break;
+    case R_RUMBLE_STR:
+        c.rumble_strength = (c.rumble_strength + 1) % 3;
+        sound_play(SFX_OK);
+        if (c.rumble) input_rumble(HAP_OK, true);
+        break;
     case R_UPDATE:
         switch (self_update_state()) {
         case UPD_READY: sound_play(SFX_OK); self_update_apply(true); return;
@@ -141,6 +164,27 @@ static void act(const Row &r) {
         default: sound_play(SFX_OK); self_update_start(true); return;
         }
     case R_AUTO_UPDATE: c.auto_update = !c.auto_update; sound_play(c.auto_update ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
+    case R_STARTUP:
+        if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: startup unchanged"); return; }
+        if (startup_set_enabled(!g_startup_on)) {
+            g_startup_on = !g_startup_on;
+            sound_play(g_startup_on ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+            toast(g_startup_on ? "Sanctum will start with Windows" : "Removed from Windows startup");
+        } else {
+            sound_play(SFX_ERROR);
+            toast("Could not update Windows startup");
+        }
+        return;
+    case R_SHORTCUT_DESKTOP:
+        if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: shortcuts unchanged"); return; }
+        if (shortcut_create_desktop()) { sound_play(SFX_TOGGLE_ON); toast("Desktop shortcut created"); }
+        else { sound_play(SFX_ERROR); toast("Could not create Desktop shortcut"); }
+        return;
+    case R_SHORTCUT_START:
+        if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: shortcuts unchanged"); return; }
+        if (shortcut_create_startmenu()) { sound_play(SFX_TOGGLE_ON); toast("Start Menu shortcut created"); }
+        else { sound_play(SFX_ERROR); toast("Could not create Start Menu shortcut"); }
+        return;
     case R_LAYOUT:   // takes effect on the next press: the press that changed it was read the old way
         c.pad_layout = (c.pad_layout + 1) % 3;
         toast(c.pad_layout == 1 ? "Switch style: A on the right confirms" : c.pad_layout == 2 ? "Xbox style: A at the bottom confirms"
@@ -204,6 +248,11 @@ void settings_frame() {
     }
     rows = rows_of(g_cat);
     if (g_row >= (int)rows.size()) g_row = std::max(0, first_focusable());
+    const int kVis = 9;
+    if (!g_in_rows) g_row_top = 0;
+    if (g_row < g_row_top) g_row_top = g_row;
+    if (g_row >= g_row_top + kVis) g_row_top = g_row - kVis + 1;
+    if (g_row_top > std::max(0, (int)rows.size() - kVis)) g_row_top = std::max(0, (int)rows.size() - kVis);
 
     background(0);
     status_bar();
@@ -212,8 +261,8 @@ void settings_frame() {
     for (int i = 0; i < CAT_N; ++i) {
         float y = 146 + i * 54;
         if (hover(44, y, 280, 46)) {
-            if (a.mouse_moved && !a.clicked && (g_cat != i || g_in_rows)) { g_cat = i, g_in_rows = false; sound_play(SFX_MOVE); }
-            if (a.clicked) { if (g_cat != i) sound_play(SFX_MOVE); g_cat = i, g_in_rows = false; }
+            if (a.mouse_moved && !a.clicked && (g_cat != i || g_in_rows)) { g_cat = i, g_in_rows = false, g_row_top = 0; sound_play(SFX_MOVE); }
+            if (a.clicked) { if (g_cat != i) sound_play(SFX_MOVE); g_cat = i, g_in_rows = false, g_row_top = 0; }
         }
         bool sel = i == g_cat;
         if (sel) { rect(44, y, 280, 46, p.panel, 12); rect(44, y + 8, 4, 30, p.accent, 2); }
@@ -224,9 +273,9 @@ void settings_frame() {
 
     float x = 384, w = 852;
     text(x, 96, 26, p.text, kCatName[g_cat]);
-    for (int i = 0; i < (int)rows.size() && i < 9; ++i) {
+    for (int i = g_row_top; i < (int)rows.size() && i < g_row_top + kVis; ++i) {
         const Row &r = rows[i];
-        float y = 146 + i * 56;
+        float y = 146 + (i - g_row_top) * 56;
         bool f = g_in_rows && i == g_row;
         if (focusable(i) && hover(x, y, w, 48)) {
             if (a.mouse_moved && !a.clicked && (!g_in_rows || g_row != i)) { g_in_rows = true, g_row = i; sound_play(SFX_MOVE); }
@@ -244,6 +293,11 @@ void settings_frame() {
         }
         if (f) focus_ring(x, y, w, 48, 12, 3);
     }
+    if ((int)rows.size() > kVis) {
+        float h = 56 * kVis - 8, bh = h * kVis / (float)rows.size();
+        rect(x + w + 12, 146, 4, h, p.line, 2);
+        rect(x + w + 12, 146 + (h - bh) * g_row_top / std::max(1, (int)rows.size() - kVis), 4, bh, p.soft, 2);
+    }
     if (g_in_rows) hint_bar({{NAV_A, "OK"}, {NAV_B, "Back"}});
     else hint_bar({{NAV_A, "Open"}, {NAV_B, "Back"}});
 }
@@ -253,13 +307,13 @@ struct Entry {
     std::string name, path;
     Icon icon;
 };
-static std::string g_dir;              // empty: "This PC" (drives and the usual places)
+static std::string g_dir, g_port_match;   // g_dir empty: "This PC"; g_port_match: matched port name for FOLDER_ADD_PORT
 static std::vector<Entry> g_entries;
 static int g_sel = 0, g_top = 0, g_pngs = 0;
 static FolderFor g_for = FOLDER_COVERS;
 
 static void list_dir(const std::string &dir) {
-    g_dir = dir, g_entries.clear(), g_sel = 0, g_top = 0;
+    g_dir = dir, g_entries.clear(), g_sel = 0, g_top = 0, g_port_match.clear();
     if (dir.empty()) {
         struct { SDL_Folder f; const char *n; } places[] = {
             {SDL_FOLDER_DESKTOP, "Desktop"}, {SDL_FOLDER_PICTURES, "Pictures"}, {SDL_FOLDER_DOWNLOADS, "Downloads"},
@@ -289,7 +343,8 @@ static void list_dir(const std::string &dir) {
     SDL_free(names);
     std::sort(dirs.begin(), dirs.end(), [](const std::string &a, const std::string &b) { return SDL_strcasecmp(a.c_str(), b.c_str()) < 0; });
     for (auto &d : dirs) g_entries.push_back({d, dir + "\\" + d, IC_FOLDER});
-    g_pngs = count_pngs(dir);
+    g_pngs = g_for == FOLDER_COVERS ? count_pngs(dir) : 0;
+    g_port_match = g_for == FOLDER_ADD_PORT ? catalog_match_folder(dir) : std::string();
 }
 
 static std::string parent_of(const std::string &d) {
@@ -328,6 +383,18 @@ void folder_frame() {
         break;
     case NAV_X:
         if (!g_dir.empty()) {
+            if (g_for == FOLDER_ADD_PORT) {
+                int added = catalog_add_folder(g_dir);
+                if (added > 0) {
+                    sound_play(SFX_TOGGLE_ON);
+                    toast("Added " + g_port_match, 3.5);
+                    go_back(true);
+                    return;
+                }
+                sound_play(SFX_ERROR);
+                toast("No SteelTemple port found in this folder");
+                break;
+            }
             if (g_for == FOLDER_COVERS) {
                 cfg().cover_dir = g_dir;
                 covers_reload();
@@ -349,11 +416,17 @@ void folder_frame() {
 
     background(0);
     status_bar();
-    text(96, 92, 26, p.text, g_for == FOLDER_COVERS ? "Choose your cover-art folder" : "Choose where new ports install");
-    text(96, 130, 16, p.soft, g_dir.empty() ? "This PC" : fit(16, g_dir, 1000).c_str());
+    const char *heading = g_for == FOLDER_COVERS ? "Choose your cover-art folder"
+                        : g_for == FOLDER_ADD_PORT ? "Choose a folder holding a port"
+                        : "Choose where new ports install";
+    text(96, 92, 26, p.text, heading);
+    text(96, 130, 16, p.soft, g_dir.empty() ? "This PC" : fit(16, g_dir, 780).c_str());
     if (!g_dir.empty() && g_for == FOLDER_COVERS) {
         std::string s = std::to_string(g_pngs) + (g_pngs == 1 ? " picture here" : " pictures here");
         text(1184, 130, 16, g_pngs ? p.ok : p.dim, s.c_str(), 1);
+    } else if (!g_dir.empty() && g_for == FOLDER_ADD_PORT) {
+        std::string s = g_port_match.empty() ? "Open a folder with a port's .exe" : "Found: " + g_port_match;
+        text(1184, 130, 16, g_port_match.empty() ? p.dim : p.ok, s.c_str(), 1);
     }
     for (int i = g_top; i < n && i < g_top + kVisible; ++i) {
         float y = 168 + (i - g_top) * 56;
@@ -373,7 +446,7 @@ void folder_frame() {
         rect(1196, 168 + (h - bh) * g_top / std::max(1, n - kVisible), 4, bh, p.soft, 2);
     }
     if (g_dir.empty()) hint_bar({{NAV_A, "Open"}, {NAV_B, "Cancel"}});
-    else hint_bar({{NAV_X, "Use this folder"}, {NAV_A, "Open"}, {NAV_B, "Up"}});
+    else hint_bar({{NAV_X, g_for == FOLDER_ADD_PORT ? "Add this folder" : "Use this folder"}, {NAV_A, "Open"}, {NAV_B, "Up"}});
 }
 
 // ======================= Controllers

@@ -3,8 +3,15 @@
 #pragma once
 #include <map>
 #include <string>
+#include <vector>
 
 namespace sanctum {
+
+struct PlayerProfile {
+    std::string name = "Player 1";
+    std::string avatar = "Sword";
+    int avatar_bg = 0;
+};
 
 struct Config {
     int theme = 0;                // THEME_DARK / THEME_LIGHT
@@ -12,6 +19,8 @@ struct Config {
     bool large_tiles = true;
     bool sounds = true;
     int sound_volume = 1;         // 0 low, 1 medium, 2 high
+    bool rumble = true;           // subtle controller vibration on focus & confirm
+    int rumble_strength = 1;      // 0 low, 1 medium, 2 high
     bool hide_dev = false;        // leave out copies inside build / staging / backup folders (they rank last anyway)
     std::map<std::string, std::string> prefer;   // port id -> the copy the player chose ("Use this copy")
     bool fullscreen = true;       // starts fullscreen, like a console
@@ -25,11 +34,17 @@ struct Config {
     bool auto_update = true;      // Sanctum downloads its own updates and puts them in place when it closes
     std::string avatar = "Sword";  // the profile icon, by its name in assets/avatars.txt
     int avatar_bg = 0;             // its background colour (avatars.cpp, kColours)
+    std::vector<PlayerProfile> profiles = {{"Player 1", "Sword", 0}};
+    int active_profile = 0;
 };
 
 Config &cfg();
 void config_load();
 void config_save();
 std::string config_dir();         // with a trailing separator
+void profile_sync_to_active();
+void profile_switch(int index);
+int profile_add();                // adds up to 4 profiles, switches to it, returns index (or -1 if full)
+bool profile_delete(int index);   // deletes a profile when more than one exists
 
 }  // namespace sanctum

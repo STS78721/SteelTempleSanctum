@@ -49,6 +49,8 @@ void go(Screen s, bool silent) {
     if (!silent) sound_play(SFX_OK);
     g_app.back.push_back(g_app.screen);
     g_app.screen = s;
+    g_app.trans_t = g_app.now;
+    g_app.trans_dir = 1;
     g_app.nav = NAV_NONE;
     g_app.clicked = false;
 }
@@ -57,6 +59,8 @@ void go_back(bool silent) {
     if (!silent) sound_play(SFX_BACK);
     g_app.screen = g_app.back.empty() ? SCR_HOME : g_app.back.back();
     if (!g_app.back.empty()) g_app.back.pop_back();
+    g_app.trans_t = g_app.now;
+    g_app.trans_dir = -1;
     g_app.nav = NAV_NONE;
     g_app.clicked = false;
 }
@@ -245,7 +249,11 @@ int main(int, char **) {
             a.nav = script[(frame - 30) / 8];
         if (a.nav == NAV_HOME && a.text_entry) { a.text_entry = false; SDL_StopTextInput(win); }   // typing ends unsaved
         if (a.nav == NAV_HOME) {
-            if (a.screen != SCR_HOME) sound_play(SFX_HOME);
+            if (a.screen != SCR_HOME) {
+                sound_play(SFX_HOME);
+                a.trans_t = a.now;
+                a.trans_dir = -1;
+            }
             a.back.clear();
             a.screen = SCR_HOME;
             a.nav = NAV_NONE;
@@ -264,6 +272,16 @@ int main(int, char **) {
         ImVec2 ds = io.DisplaySize;
         a.scale = SDL_min(ds.x / 1280.0f, ds.y / 720.0f);
         a.ox = (ds.x - 1280 * a.scale) / 2, a.oy = (ds.y - 720 * a.scale) / 2;
+        float trans_fade = 0.0f;
+        if (!shot) {
+            float tp = (float)((a.now - a.trans_t) / 0.14);
+            if (tp >= 0.0f && tp < 1.0f) {
+                float u = 1.0f - tp;
+                float rem = u * u * u;   // cubic ease-out remainder
+                a.oy += rem * (a.trans_dir >= 0 ? 12.0f : -10.0f) * a.scale;
+                trans_fade = rem;
+            }
+        }
 
         // a game starting: the screens wait under the Starting screen (B cancels a start that hangs)
         bool starting = launch_starting();
@@ -282,7 +300,10 @@ int main(int, char **) {
         case SCR_NEWS: news_frame(); break;
         case SCR_PORT_SETTINGS: port_settings_frame(); break;
         case SCR_PROFILE: profile_frame(); break;
+        case SCR_MODS: mods_frame(); break;
         }
+        if (trans_fade > 0.005f)
+            dl()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, with_alpha(pal().bg, (int)(trans_fade * 165)));
         if (starting) {
             const Palette &p = pal();
             int pi = running_port();

@@ -4,6 +4,8 @@
 // notes, up/down scroll them, B comes back out.
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <mutex>
 
 #include "config.h"
 #include "covers.h"
@@ -11,6 +13,8 @@
 #include "github.h"
 #include "install.h"
 #include "launch.h"
+#include "mods.h"
+#include "platform.h"
 #include "port_settings.h"
 #include "sound.h"
 
@@ -18,11 +22,84 @@ namespace sanctum {
 
 static const char *kTabs[] = {"Overview", "Release notes", "Settings", "Mods", "Files & storage"};
 static const int kTabN = 5;
-static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0;
+static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0, g_file_row = 0;
 static float g_tab_x = 0, g_scroll = 0, g_scroll_to = 0, g_notes_max = 0;
 static int g_notes_game = -1, g_notes_rel = -1;
-enum { ROW_ACTIONS, ROW_COPIES, ROW_RELEASES, ROW_NOTES, ROW_SETTINGS };
+static double g_uninstall_armed = -10;
+enum { ROW_ACTIONS, ROW_COPIES, ROW_RELEASES, ROW_NOTES, ROW_SETTINGS, ROW_MODS, ROW_FILES };
 static int g_row = ROW_ACTIONS;
+
+// ---- async disk size measurement for Files & storage
+struct SizeInfo {
+    bool ready = false, running = false;
+    long long bytes = 0;
+    int files = 0;
+};
+static std::mutex g_size_lock;
+static std::map<std::string, SizeInfo> g_sizes;
+
+static int size_worker(void *p) {
+    auto *dir = (std::string *)p;
+    int files = 0;
+    long long bytes = folder_size_bytes(*dir, &files);
+    {
+        std::lock_guard<std::mutex> l(g_size_lock);
+        g_sizes[*dir] = {true, false, bytes, files};
+    }
+    delete dir;
+    return 0;
+}
+
+static SizeInfo folder_size_cached(const std::string &dir, bool force = false) {
+    if (dir.empty()) return {};
+    std::lock_guard<std::mutex> l(g_size_lock);
+    SizeInfo &si = g_sizes[dir];
+    if (!si.running && (!si.ready || force)) {
+        si.running = true;
+        if (force) si.ready = false;
+        SDL_Thread *t = SDL_CreateThread(size_worker, "dirsize", new std::string(dir));
+        if (t) SDL_DetachThread(t);
+        else si.running = false;
+    }
+    return si;
+}
+
+static bool has_installable_asset(const Install *in, const Release &r) {
+    if (in && r.find(ASSET_UPDATE)) return true;
+    return r.find(ASSET_PORTABLE) != nullptr || r.find(ASSET_WIZARD) != nullptr;
+}
+
+static void install_release(int port_i, const Port &port, const Install *in, const Release &r, bool busy) {
+    if (game_running()) { sound_play(SFX_ERROR); toast("Close the game first"); return; }
+    if (busy) { sound_play(SFX_ERROR); toast("A download for this port is already running"); return; }
+    if (in && !in->version.empty() && tag_key(in->version) == tag_key(r.tag)) {
+        sound_play(SFX_ERROR);
+        toast("Already on " + r.tag);
+        return;
+    }
+    if (in) {
+        if (const Asset *up = r.find(ASSET_UPDATE)) {
+            install_enqueue(port_i, r, *up, JOB_UPDATE, in->dir);
+            sound_play(SFX_OK);
+            toast("Queued " + std::string(port.name) + " " + r.tag + " in Downloads");
+            return;
+        }
+    }
+    if (const Asset *as = r.find(ASSET_PORTABLE)) {
+        install_enqueue(port_i, r, *as, JOB_INSTALL);
+        sound_play(SFX_OK);
+        toast("Queued " + std::string(port.name) + " " + r.tag + " in Downloads");
+        return;
+    }
+    if (const Asset *w = r.find(ASSET_WIZARD)) {
+        install_enqueue(port_i, r, *w, JOB_WIZARD);
+        sound_play(SFX_OK);
+        toast("Queued " + std::string(port.name) + " " + r.tag + " in Downloads");
+        return;
+    }
+    sound_play(SFX_ERROR);
+    toast("This release has no package Sanctum can install");
+}
 
 void game_show_overview(int port) {   // back from a game: its page, at the top, the last run first
     app().game = port;
@@ -180,6 +257,105 @@ void game_frame() {
     // ---- input
     bool copies_here = g_tab == 0 && port.installs.size() > 1;
     bool notes_here = g_tab == 1 && !port.releases.empty();
+    // files & storage action list (needed for Up/Down/A handling)
+    struct FileRow { std::string label, value; int id; };
+    enum { F_OPEN_DIR, F_OPEN_LOGS, F_VERIFY, F_BACKUP_INI, F_RESTORE_INI, F_UNINSTALL };
+    std::vector<FileRow> frows;
+    std::string f_ini, f_bak, f_miss;
+    if (g_tab == 4 && in) {
+        f_miss = missing_for_play(port, *in);
+        f_ini = port_settings_ini_path(a.game);
+        f_bak = f_ini.empty() ? std::string() : f_ini + ".sanctum-bak";
+        bool has_logs = SDL_GetPathInfo((in->dir + "\\logs").c_str(), nullptr);
+        frows.push_back({"Open install folder", "Explorer", F_OPEN_DIR});
+        frows.push_back({"Open logs folder", has_logs ? "logs\\" : "Install folder", F_OPEN_LOGS});
+        frows.push_back({"Verify required files", f_miss.empty() ? "All present" : "Missing files", F_VERIFY});
+        if (!f_bak.empty() && SDL_GetPathInfo(f_bak.c_str(), nullptr))
+            frows.push_back({"Restore settings backup", ".sanctum-bak", F_RESTORE_INI});
+        else if (!f_ini.empty() && SDL_GetPathInfo(f_ini.c_str(), nullptr))
+            frows.push_back({"Back up settings", "Save .sanctum-bak", F_BACKUP_INI});
+        bool armed = a.now - g_uninstall_armed < 4.0;
+        frows.push_back({"Uninstall this copy", armed ? "Press again to move to Recycle Bin" : "Moves to Recycle Bin", F_UNINSTALL});
+        if (g_file_row >= (int)frows.size()) g_file_row = std::max(0, (int)frows.size() - 1);
+    }
+
+    auto run_file_act = [&](int fid) {
+        if (!in) return;
+        switch (fid) {
+        case F_OPEN_DIR:
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: folders don't open"); break; }
+            sound_play(SFX_OK);
+            SDL_OpenURL(("file:///" + in->dir).c_str());
+            break;
+        case F_OPEN_LOGS: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: folders don't open"); break; }
+            std::string ldir = in->dir + "\\logs";
+            if (!SDL_GetPathInfo(ldir.c_str(), nullptr)) ldir = in->dir;
+            sound_play(SFX_OK);
+            SDL_OpenURL(("file:///" + ldir).c_str());
+            break;
+        }
+        case F_VERIFY: {
+            std::string m = missing_for_play(port, *in);
+            folder_size_cached(in->dir, true);
+            if (m.empty()) { sound_play(SFX_TOGGLE_ON); toast("All required game files are present"); }
+            else { sound_play(SFX_ERROR); toast("Missing: " + m, 4); }
+            break;
+        }
+        case F_BACKUP_INI: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: files unchanged"); break; }
+            size_t sz = 0;
+            if (void *d = SDL_LoadFile(f_ini.c_str(), &sz)) {
+                bool ok = SDL_SaveFile(f_bak.c_str(), d, sz);
+                SDL_free(d);
+                sound_play(ok ? SFX_TOGGLE_ON : SFX_ERROR);
+                toast(ok ? "Settings backed up" : "Could not save settings backup");
+            } else {
+                sound_play(SFX_ERROR);
+                toast("Settings file not found");
+            }
+            break;
+        }
+        case F_RESTORE_INI: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: files unchanged"); break; }
+            if (running) { sound_play(SFX_ERROR); toast("Close the game first"); break; }
+            size_t sz = 0;
+            if (void *d = SDL_LoadFile(f_bak.c_str(), &sz)) {
+                bool ok = SDL_SaveFile(f_ini.c_str(), d, sz);
+                SDL_free(d);
+                sound_play(ok ? SFX_OK : SFX_ERROR);
+                toast(ok ? "Settings restored from backup" : "Could not restore settings");
+            } else {
+                sound_play(SFX_ERROR);
+                toast("Backup file not found");
+            }
+            break;
+        }
+        case F_UNINSTALL: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: nothing deleted"); break; }
+            if (running) { sound_play(SFX_ERROR); toast("Close the game first"); break; }
+            if (a.now - g_uninstall_armed < 4.0) {
+                g_uninstall_armed = -10;
+                std::string target = in->dir;
+                if (recycle_path(target)) {
+                    catalog_remove(a.game, target);
+                    g_copy = 0, g_row = ROW_ACTIONS, g_file_row = 0;
+                    sound_play(SFX_BACK);
+                    toast("Moved copy to Recycle Bin", 3.5);
+                } else {
+                    sound_play(SFX_ERROR);
+                    toast("Could not move folder to Recycle Bin (is a file open?)", 4);
+                }
+            } else {
+                g_uninstall_armed = a.now;
+                sound_play(SFX_ERROR);
+                toast("Press again to move " + in->dir + " to Recycle Bin", 4);
+            }
+            break;
+        }
+        }
+    };
+
     switch (a.nav) {
     case NAV_LEFT:
         if (g_row == ROW_ACTIONS) {
@@ -197,6 +373,8 @@ void game_frame() {
         if (g_row == ROW_ACTIONS && copies_here) { g_row = ROW_COPIES; sound_play(SFX_MOVE); }
         else if (g_row == ROW_ACTIONS && notes_here) { g_row = ROW_RELEASES; sound_play(SFX_MOVE); }
         else if (g_row == ROW_ACTIONS && g_tab == 2 && in) { g_row = ROW_SETTINGS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_ACTIONS && g_tab == 3 && in) { g_row = ROW_MODS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_ACTIONS && g_tab == 4 && in && !frows.empty()) { g_row = ROW_FILES, g_file_row = 0; sound_play(SFX_MOVE); }
         else if (g_row == ROW_COPIES) {
             if (g_copy < (int)port.installs.size() - 1) { g_copy++; sound_play(SFX_MOVE); }
             else sound_play(SFX_EDGE);
@@ -206,6 +384,9 @@ void game_frame() {
         } else if (g_row == ROW_NOTES) {
             bool at_end = g_notes_game == a.game && g_notes_rel == g_rel && g_scroll_to >= g_notes_max;
             if (!at_end) { g_scroll_to += 90; sound_play(SFX_KEY); }
+            else sound_play(SFX_EDGE);
+        } else if (g_row == ROW_FILES) {
+            if (g_file_row < (int)frows.size() - 1) { g_file_row++; sound_play(SFX_MOVE); }
             else sound_play(SFX_EDGE);
         } else {
             sound_play(SFX_EDGE);
@@ -218,11 +399,12 @@ void game_frame() {
             if (g_scroll_to > 0) { g_scroll_to = std::max(0.0f, g_scroll_to - 90); sound_play(SFX_KEY); }
             else sound_play(SFX_EDGE);
         }
-        else if (g_row == ROW_SETTINGS) { g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_SETTINGS || g_row == ROW_MODS) { g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_FILES) { if (g_file_row > 0) g_file_row--; else g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
         else sound_play(SFX_EDGE);
         break;
-    case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; sound_play(SFX_TAB); break;
-    case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; sound_play(SFX_TAB); break;
+    case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; g_file_row = 0; sound_play(SFX_TAB); break;
+    case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; g_file_row = 0; sound_play(SFX_TAB); break;
     case NAV_A:
         if (g_row == ROW_COPIES) {   // remembered: Play starts this copy from now on
             catalog_prefer(a.game, port.installs[g_copy].dir);
@@ -232,7 +414,13 @@ void game_frame() {
         }
         else if (g_row == ROW_RELEASES) { g_row = ROW_NOTES; sound_play(SFX_OK); }
         else if (g_row == ROW_ACTIONS) run(acts[g_action].id);
+        else if (g_row == ROW_MODS && in) mods_open(a.game);
+        else if (g_row == ROW_FILES && g_file_row < (int)frows.size()) run_file_act(frows[g_file_row].id);
         else if (g_row == ROW_SETTINGS) { /* the tab body opens it (below), with a.nav still A */ }
+        break;
+    case NAV_X:
+        if (g_tab == 1 && (g_row == ROW_RELEASES || g_row == ROW_NOTES) && !port.releases.empty())
+            install_release(a.game, port, in, port.releases[g_rel], busy);
         break;
     case NAV_Y: run(ACT_GITHUB); break;
     case NAV_B:
@@ -385,10 +573,11 @@ void game_frame() {
         float nx = x + 206, nw = 574, ny = by, nh = 226;
         rect(nx, ny, nw, nh, p.panel, 12);
         if (g_row == ROW_NOTES) focus_ring(nx, ny, nw, nh, 12, 3);
+        bool can_inst = has_installable_asset(in, r) && !(in && !in->version.empty() && tag_key(in->version) == tag_key(r.tag));
         dl()->PushClipRect(P(nx, ny + 6), P(nx + nw, ny + nh - 6), true);
         g_scroll = ease(g_scroll, g_scroll_to, 16);
         float y = ny + 14 - g_scroll, tw = nw - 36;
-        y += text_wrap(nx + 18, y, 18, p.text, (r.title.empty() ? r.tag : r.title).c_str(), tw) + 8;
+        y += text_wrap(nx + 18, y, 18, p.text, (r.title.empty() ? r.tag : r.title).c_str(), can_inst ? tw - 170 : tw) + 8;
         for (const Line &l : notes_lines(r.body)) {
             if (l.kind == 4) { y += 8; continue; }
             if (l.kind == 1) { y += 6; y += text_wrap(nx + 18, y, 16, port.colours.accent, l.text.c_str(), tw) + 4; continue; }
@@ -401,6 +590,15 @@ void game_frame() {
         g_notes_game = a.game, g_notes_rel = g_rel;
         g_scroll_to = std::min(g_scroll_to, g_notes_max);
         dl()->PopClipRect();
+        if (can_inst && !busy) {
+            const char *bl = in ? "Install version" : "Download";
+            float bw = text_w(13, bl) + 28, bx = nx + nw - bw - 16, byb = ny + 10;
+            if (a.clicked && hover(bx, byb, bw, 28)) install_release(a.game, port, in, r, busy);
+            rect(bx, byb, bw, 28, with_alpha(port.colours.accent, hover(bx, byb, bw, 28) ? 235 : 190), 14);
+            ImU32 a_ = port.colours.accent;
+            bool bright = ((a_ & 255) * 299 + ((a_ >> 8) & 255) * 587 + ((a_ >> 16) & 255) * 114) / 1000 > 170;
+            text(bx + bw / 2, byb + 7, 13, bright ? IM_COL32(20, 20, 20, 255) : IM_COL32_WHITE, bl, 0.5f);
+        }
         if (content > nh) {   // where in the notes
             float bh = nh * nh / content;
             rect(nx + nw - 8, ny + 6 + (nh - 12 - bh) * (g_scroll / std::max(1.0f, content - nh + 28)), 3, bh - 12, p.dim, 2);
@@ -431,14 +629,73 @@ void game_frame() {
         }
         break;
     }
+    case 3: {   // Mods
+        if (!in) { text(x, by, 17, p.soft, "Install the port to manage its mods here."); break; }
+        int en = 0, tot = mods_summary(in->dir, &en);
+        std::string head = std::string(port.name) + " mods";
+        std::string sub = tot ? std::to_string(en) + " of " + std::to_string(tot) + " mods enabled  ·  A opens the mod manager"
+                              : "No mods installed yet  ·  A opens the mod manager and mods folder";
+        if (hover(x, by, 780, 74)) {
+            if (a.mouse_moved && !a.clicked && g_row != ROW_MODS) { g_row = ROW_MODS; sound_play(SFX_MOVE); }
+            if (a.clicked) { g_row = ROW_MODS; mods_open(a.game); return; }
+        }
+        rect(x, by, 780, 74, p.panel, 14);
+        rect(x, by, 6, 74, port.colours.accent, 3);
+        icon(IC_MODS, x + 40, by + 37, 26, port.colours.accent);
+        text(x + 72, by + 14, 18, p.text, head.c_str());
+        text(x + 72, by + 42, 14, p.soft, fit(14, sub, 680).c_str());
+        if (g_row == ROW_MODS) focus_ring(x, by, 780, 74, 14, 4);
+        break;
+    }
+    case 4: {   // Files & storage
+        if (!in) { text(x, by, 17, p.soft, "Install the port to manage its files and storage here."); break; }
+        SizeInfo si = demo_mode() ? SizeInfo{true, false, 1420000000LL, 420} : folder_size_cached(in->dir);
+        std::string loc = shown_path(in->dir, port.title);
+        std::string sz = si.ready ? (mb(si.bytes) + "  ·  " + std::to_string(si.files) + " files") : "Calculating size...";
+        rect(x, by, 780, 38, p.panel2, 10);
+        text(x + 16, by + 10, 14, p.text, fit(14, loc, 430).c_str());
+        text(x + 764, by + 10, 14, f_miss.empty() ? p.ok : p.warn,
+             (sz + (f_miss.empty() ? "  ·  Ready" : "  ·  Missing files")).c_str(), 1);
+
+        int n = (int)frows.size();
+        const int kVis = 4;
+        int top = std::max(0, std::min(g_file_row - 1, n - kVis));
+        for (int i = top; i < n && i < top + kVis; ++i) {
+            const FileRow &fr = frows[i];
+            float y = by + 46 + (i - top) * 46;
+            if (hover(x, y, 780, 40)) {
+                if (a.mouse_moved && !a.clicked && (g_row != ROW_FILES || g_file_row != i)) {
+                    g_row = ROW_FILES, g_file_row = i;
+                    sound_play(SFX_MOVE);
+                }
+                if (a.clicked) { g_row = ROW_FILES, g_file_row = i; run_file_act(fr.id); break; }
+            }
+            rect(x, y, 780, 40, p.panel, 10);
+            ImU32 lc = fr.id == F_UNINSTALL ? p.warn : p.text;
+            text(x + 18, y + 10, 16, lc, fr.label.c_str());
+            text(x + 762, y + 11, 14, fr.id == F_UNINSTALL ? p.warn : p.soft, fr.value.c_str(), 1);
+            if (g_row == ROW_FILES && i == g_file_row) focus_ring(x, y, 780, 40, 10, 3);
+        }
+        if (n > kVis) {
+            float h = 46 * kVis - 6, bh = h * kVis / n;
+            rect(x + 788, by + 46, 3, h, p.line, 2);
+            rect(x + 788, by + 46 + (h - bh) * top / std::max(1, n - kVis), 3, bh, p.soft, 2);
+        }
+        break;
+    }
     default:
-        text(x, by, 17, p.dim, "Coming in a later build step. Until then, the port's own launcher has these.");
         break;
     }
 
+    bool rel_installable = g_tab == 1 && !port.releases.empty() && has_installable_asset(in, port.releases[g_rel]) &&
+                           !(in && !in->version.empty() && tag_key(in->version) == tag_key(port.releases[g_rel].tag));
     if (g_row == ROW_COPIES) hint_bar({{NAV_A, "Use this copy"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+    else if (g_row == ROW_RELEASES && rel_installable) hint_bar({{NAV_A, "Read"}, {NAV_X, "Install version"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_RELEASES) hint_bar({{NAV_A, "Read"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_SETTINGS) hint_bar({{NAV_A, "Open settings"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+    else if (g_row == ROW_MODS) hint_bar({{NAV_A, "Open mods"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+    else if (g_row == ROW_FILES) hint_bar({{NAV_A, "OK"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+    else if (g_row == ROW_NOTES && rel_installable) hint_bar({{NAV_X, "Install version"}, {NAV_Y, "Open on GitHub"}, {NAV_B, "Back to the list"}});
     else if (g_row == ROW_NOTES) hint_bar({{NAV_Y, "Open on GitHub"}, {NAV_B, "Back to the list"}});
     else hint_bar({{NAV_A, acts[g_action].label.substr(0, acts[g_action].label.find("  ")).c_str()}, {NAV_Y, "GitHub"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
 }
