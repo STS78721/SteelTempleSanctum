@@ -38,10 +38,10 @@ const char *sanctum_version() {
     return v;
 }
 
-// "v1.2.3" / "1.2.3" / "1.0.4b" / "Sanctum 1.2" -> ({1, 2, 3}, "") or ({1, 0, 4}, "b")
+// "v1.2.3" / "1.2.3" / "1.0.5b" / "1.0.5.b" / "1.0.5-c" / "Sanctum 1.2" -> ({1, 2, 3}, "") or ({1, 0, 5}, "b")
 struct ParsedVer {
     std::vector<int> nums;
-    std::string suffix;   // trailing hotfix letters after the final digit (e.g. "b" in "1.0.4b")
+    std::string suffix;   // trailing hotfix letters after the final digit (e.g. "b" in "1.0.5b", "1.0.5.b", "1.0.5-b")
 };
 static ParsedVer parse_ver(const std::string &s) {
     ParsedVer out;
@@ -55,7 +55,9 @@ static ParsedVer parse_ver(const std::string &s) {
         } else ++i;
     }
     if (last_digit != std::string::npos) {
-        for (size_t i = last_digit; i < s.size() && isalpha((unsigned char)s[i]); ++i)
+        size_t i = last_digit;
+        while (i < s.size() && (s[i] == '.' || s[i] == '-' || s[i] == '_')) ++i;
+        for (; i < s.size() && isalpha((unsigned char)s[i]); ++i)
             out.suffix += (char)SDL_tolower((unsigned char)s[i]);
     }
     return out;
@@ -66,6 +68,7 @@ static bool newer(const std::string &a, const std::string &b) {   // a is a late
         int p = i < x.nums.size() ? x.nums[i] : 0, q = i < y.nums.size() ? y.nums[i] : 0;
         if (p != q) return p > q;
     }
+    if (x.suffix.size() != y.suffix.size()) return x.suffix.size() > y.suffix.size();
     return x.suffix > y.suffix;
 }
 

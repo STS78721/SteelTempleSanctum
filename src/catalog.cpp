@@ -209,9 +209,12 @@ static bool is_dev_path(const std::string &dir) {
     return false;
 }
 
-// "0.2.10" after "0.2.9", "Beta-6.3" after "Beta-6.2b": numbers compared as numbers, the rest as text
+// "0.2.10" after "0.2.9", "Beta-6.3" after "Beta-6.2b", "0.2.3.b"/"0.2.3b" after "0.2.3": numbers as numbers, rest as text
 static bool version_newer(const std::string &a, const std::string &b) {
     size_t i = 0, j = 0;
+    auto sep_before_alpha = [](const std::string &s, size_t k) {
+        return k + 1 < s.size() && (s[k] == '.' || s[k] == '-' || s[k] == '_') && SDL_isalpha((unsigned char)s[k + 1]);
+    };
     while (i < a.size() && j < b.size()) {
         if (SDL_isdigit((unsigned char)a[i]) && SDL_isdigit((unsigned char)b[j])) {
             size_t i2 = i, j2 = j;
@@ -222,13 +225,15 @@ static bool version_newer(const std::string &a, const std::string &b) {
             i = i2, j = j2;
             continue;
         }
+        if (sep_before_alpha(a, i) && SDL_isalpha((unsigned char)b[j])) { ++i; continue; }
+        if (sep_before_alpha(b, j) && SDL_isalpha((unsigned char)a[i])) { ++j; continue; }
         char x = (char)SDL_tolower((unsigned char)a[i]), y = (char)SDL_tolower((unsigned char)b[j]);
         if (x == ' ' || x == '-') x = '-';
         if (y == ' ' || y == '-') y = '-';
         if (x != y) return x > y;
         ++i, ++j;
     }
-    return a.size() - i > b.size() - j;   // "0.2.2c" after "0.2.2"
+    return a.size() - i > b.size() - j;   // "0.2.2c" / "0.2.2.b" after "0.2.2"
 }
 
 // best first: a Setup Wizard's install, a player's copy before a build folder, the newest version (an unknown one
