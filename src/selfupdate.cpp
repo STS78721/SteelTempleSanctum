@@ -38,25 +38,35 @@ const char *sanctum_version() {
     return v;
 }
 
-// "v1.2.3" / "1.2.3" / "Sanctum 1.2" -> {1, 2, 3}
-static std::vector<int> numbers(const std::string &s) {
-    std::vector<int> v;
+// "v1.2.3" / "1.2.3" / "1.0.4b" / "Sanctum 1.2" -> ({1, 2, 3}, "") or ({1, 0, 4}, "b")
+struct ParsedVer {
+    std::vector<int> nums;
+    std::string suffix;   // trailing hotfix letters after the final digit (e.g. "b" in "1.0.4b")
+};
+static ParsedVer parse_ver(const std::string &s) {
+    ParsedVer out;
+    size_t last_digit = std::string::npos;
     for (size_t i = 0; i < s.size();) {
         if (isdigit((unsigned char)s[i])) {
             int n = 0;
             while (i < s.size() && isdigit((unsigned char)s[i])) n = n * 10 + (s[i++] - '0');
-            v.push_back(n);
+            out.nums.push_back(n);
+            last_digit = i;
         } else ++i;
     }
-    return v;
+    if (last_digit != std::string::npos) {
+        for (size_t i = last_digit; i < s.size() && isalpha((unsigned char)s[i]); ++i)
+            out.suffix += (char)SDL_tolower((unsigned char)s[i]);
+    }
+    return out;
 }
 static bool newer(const std::string &a, const std::string &b) {   // a is a later version than b
-    auto x = numbers(a), y = numbers(b);
-    for (size_t i = 0; i < std::max(x.size(), y.size()); ++i) {
-        int p = i < x.size() ? x[i] : 0, q = i < y.size() ? y[i] : 0;
+    auto x = parse_ver(a), y = parse_ver(b);
+    for (size_t i = 0; i < std::max(x.nums.size(), y.nums.size()); ++i) {
+        int p = i < x.nums.size() ? x.nums[i] : 0, q = i < y.nums.size() ? y.nums[i] : 0;
         if (p != q) return p > q;
     }
-    return false;
+    return x.suffix > y.suffix;
 }
 
 static std::string load(const std::string &path) {
