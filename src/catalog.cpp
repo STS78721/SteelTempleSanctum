@@ -21,15 +21,15 @@
 namespace sanctum {
 
 static std::vector<Port> g_ports = {
-    {"mkw-thwomp", "Mario Kart World", "MKW-THWOMP", "STS78721/MKW-THWOMP", "0.2.2c", "204 MB", "mariokartworld", "MKW",
+    {"mkw-thwomp", "Mario Kart World", "MKW-THWOMP", "STS78721/MKW-THWOMP", "0.2.3", "204 MB", "mariokartworld", "MKW",
      "mkw.exe", "mkwgame.id", nullptr, "MKW-THWOMP", {IM_COL32(232, 36, 48, 255), IM_COL32(90, 12, 18, 255)}},
-    {"mastersword", "The Legend of Zelda: Ocarina of Time", "MasterSword", "STS78721/OOT-MASTERSWORD", "0.2.2", "176 MB",
+    {"mastersword", "The Legend of Zelda: Ocarina of Time", "MasterSword", "STS78721/OOT-MASTERSWORD", "0.2.3", "176 MB",
      "ocarinaoftime", "OoT", "mastersword.exe", nullptr, "MasterSwordLauncher.exe", nullptr,
      {IM_COL32(47, 158, 90, 255), IM_COL32(122, 90, 18, 255)}},
     {"totk", "The Legend of Zelda: Tears of the Kingdom", "TotK SteelTempleBuild", "STS78721/totk-pc-recomp-SteelTempleBuild",
      "Beta-6.3", "97 MB", "tearsofthekingdom", "TotK", "totk.exe", nullptr, "TotKLauncher.exe", nullptr,
      {IM_COL32(31, 143, 134, 255), IM_COL32(59, 42, 16, 255)}},
-    {"slowseparation", "Fast Fusion", "SlowSeparation", "STS78721/SlowSeparation", "Alpha-0.1.1", "158 MB", "fastfusion",
+    {"slowseparation", "Fast Fusion", "SlowSeparation", "STS78721/SlowSeparation", "Alpha-0.1.2", "158 MB", "fastfusion",
      "FF", "ff.exe", nullptr, "FFLauncher.exe", nullptr, {IM_COL32(255, 46, 136, 255), IM_COL32(15, 13, 34, 255)}},
     {"shadowracket", "Mario Tennis Fever", "ShadowRacket", "STS78721/MTF-ShadowRacket", "Alpha-0.1.3b", "156 MB",
      "mariotennisfever", "MTF", "mtf.exe", nullptr, "MTFLauncher.exe", nullptr,
@@ -99,7 +99,7 @@ PortState Port::state() const {
     return releases.empty() && version_newer(known_tag, b->version) ? PORT_UPDATE : PORT_INSTALLED;
 }
 
-static std::string read_version(const std::string &dir);
+static std::string read_version(const std::string &dir, const char *exe = nullptr);
 
 static bool folder_matches_port(const Port &p, const std::string &dir) {
     bool game = exists(dir + "\\" + p.exe) && (!p.also || exists(dir + "\\" + p.also));
@@ -127,14 +127,14 @@ int catalog_add_folder(const std::string &dir) {
             if (lower(in.dir) == lower(clean)) {
                 in.dev = false;
                 in.launcher = p.launcher && exists(clean + "\\" + p.launcher);
-                if (in.version.empty()) in.version = read_version(clean);
+                if (in.version.empty()) in.version = read_version(clean, p.exe);
                 had = true;
                 break;
             }
         if (!had) {
             Install in;
             in.dir = clean;
-            in.version = read_version(clean);
+            in.version = read_version(clean, p.exe);
             in.launcher = p.launcher && exists(clean + "\\" + p.launcher);
             in.dev = false;
             p.all.push_back(std::move(in));
@@ -274,8 +274,34 @@ void catalog_refilter() { refilter(); }
 // ---- small file helpers
 static bool exists(const std::string &p) { return SDL_GetPathInfo(p.c_str(), nullptr); }
 
-static std::string read_version(const std::string &dir) {
-    for (const char *f : {"VERSION", "launcher\\version.txt", "version.txt"}) {
+static std::string exe_stem_of(const char *exe) {
+    if (!exe) return {};
+    std::string s = lower(exe);
+    if (size_t dot = s.rfind('.'); dot != std::string::npos) s.resize(dot);
+    return s;
+}
+
+static std::string companion_dll(const std::string &dir, const char *id, const char *exe) {
+    std::string stem = exe_stem_of(exe);
+    if (!stem.empty()) {
+        std::string p = dir + "\\" + stem + "_vk.dll";
+        if (exists(p)) return p;
+    }
+    if (id && strcmp(id, "mastersword") == 0) {
+        std::string p = dir + "\\hookshot_vk.dll";
+        if (exists(p)) return p;
+    }
+    return {};
+}
+
+static std::string read_version(const std::string &dir, const char *exe) {
+    std::vector<std::string> files;
+    std::string stem = exe_stem_of(exe);
+    if (!stem.empty()) files.push_back(stem + "_version.txt");
+    files.push_back("VERSION");
+    files.push_back("launcher\\version.txt");
+    files.push_back("version.txt");
+    for (const std::string &f : files) {
         size_t n = 0;
         char *d = (char *)SDL_LoadFile((dir + "\\" + f).c_str(), &n);
         if (!d) continue;
@@ -283,6 +309,10 @@ static std::string read_version(const std::string &dir) {
         SDL_free(d);
         s = s.substr(0, s.find_first_of("\r\n"));
         while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+        if (lower(s).rfind("version=", 0) == 0) {
+            s.erase(0, 8);
+            while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(0, 1);
+        }
         // a version is short and plain (not, say, a resource script that happens to be called version.txt)
         if (!s.empty() && s.size() <= 24 && s.find_first_of("(=#{") == std::string::npos) return s;
     }
@@ -322,7 +352,7 @@ static void check_folder(const std::string &dir, const char *const *names, int c
         if (!game && !(p.launcher && has(p.launcher))) continue;
         Install in;
         in.dir = dir;
-        in.version = read_version(dir);
+        in.version = read_version(dir, p.exe);
         in.launcher = p.launcher && has(p.launcher);
         add_found(out, i, std::move(in));
     }
@@ -399,7 +429,7 @@ static int search(void *) {
         Install in;
         in.dir = dir;
         in.version = reg_string(HKEY_CURRENT_USER, sub, L"DisplayVersion");
-        if (in.version.empty()) in.version = read_version(dir);
+        if (in.version.empty()) in.version = read_version(dir, g_ports[i].exe);
         in.launcher = g_ports[i].launcher && exists(dir + "\\" + g_ports[i].launcher);
         in.registered = true;
         add_found(out, i, std::move(in));
@@ -501,7 +531,7 @@ void library_load() {
 // a match standing alone (no letter, digit or dot either side); the newest tag found wins.
 struct ProbeJob {
     int port;
-    std::string dir, exe, id, exe_stem, title, tag_sig;
+    std::string dir, exe, dll, id, exe_stem, title, tag_sig;
     std::vector<std::string> tags;   // newest first
 };
 struct ProbeHit {
@@ -511,7 +541,7 @@ struct ProbeHit {
 static std::mutex g_probe_lock;
 static std::vector<ProbeHit> g_probe_hits;
 static std::atomic<bool> g_probe_running{false}, g_probe_again{false};
-static std::map<std::string, std::string> g_probe_cache;   // "<exe>|<size>|<time>|v2|<tag_sig>" -> version
+static std::map<std::string, std::string> g_probe_cache;   // "<exe>|<size>|<time>[+<dll_size>:<dll_time>]|v3|<tag_sig>" -> version
 static bool g_probe_cache_loaded = false;
 static std::string probe_cache_path() { return config_dir() + "versions.ini"; }
 
@@ -541,23 +571,27 @@ static void probe_cache_load() {
         size_t eq = l.rfind('=');
         if (eq == std::string::npos || l.empty() || l[0] == '#') continue;
         std::string k = l.substr(0, eq);
-        // Drop legacy v1 entries (without |v2|): they could permanently cache "" before a new tag arrived on GitHub
-        if (k.find("|v2|") == std::string::npos) continue;
+        // Drop legacy v1/v2 entries (without |v3|): v3 also tracks companion renderer DLLs (e.g. mastersword_vk.dll)
+        if (k.find("|v3|") == std::string::npos) continue;
         g_probe_cache[k] = l.substr(eq + 1);
     }
 }
 
 static void probe_cache_save() {
-    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>|v2|<tags>=<version>)\n";
+    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>|v3|<tags>=<version>)\n";
     for (auto &e : g_probe_cache) s += e.first + "=" + e.second + "\n";
     std::string tmp = probe_cache_path() + ".tmp";
     if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), probe_cache_path().c_str());
 }
 
-static std::string probe_prefix(const std::string &exe) {
+static std::string probe_prefix(const std::string &exe, const std::string &dll = {}) {
     SDL_PathInfo i;
     if (!SDL_GetPathInfo(exe.c_str(), &i)) return {};
-    return exe + "|" + std::to_string(i.size) + "|" + std::to_string(i.modify_time) + "|v2|";
+    std::string s = exe + "|" + std::to_string(i.size) + "|" + std::to_string(i.modify_time);
+    SDL_PathInfo di;
+    if (!dll.empty() && SDL_GetPathInfo(dll.c_str(), &di))
+        s += "+" + std::to_string(di.size) + ":" + std::to_string(di.modify_time);
+    return s + "|v3|";
 }
 
 static bool valid_ver(const std::string &s) {
@@ -633,7 +667,7 @@ static std::string probe_direct_chunk(const char *buf, size_t len, const std::st
     return {};
 }
 
-static std::string probe_file(const ProbeJob &j) {
+static std::string probe_binary(const std::string &path, const ProbeJob &j) {
     // every spelling: as tagged, '-' as ' ' ("Alpha-0.1.1" / "Alpha 0.1.1"), and with a leading v
     std::vector<std::pair<std::string, int>> pats;   // (text, tag index)
     for (int t = 0; t < (int)j.tags.size(); ++t) {
@@ -642,7 +676,7 @@ static std::string probe_file(const ProbeJob &j) {
         for (const std::string &s : {a, b, "v" + a})
             if (s.size() >= 3) pats.push_back({s, t});
     }
-    SDL_IOStream *io = SDL_IOFromFile(j.exe.c_str(), "rb");
+    SDL_IOStream *io = SDL_IOFromFile(path.c_str(), "rb");
     if (!io) return {};
     const size_t chunk = 8 << 20, keep = 256;
     std::vector<char> buf(chunk + keep);
@@ -689,10 +723,19 @@ static std::string probe_file(const ProbeJob &j) {
     return best < (int)j.tags.size() ? j.tags[best] : std::string();
 }
 
+static std::string probe_file(const ProbeJob &j) {
+    // Renderer-only updates (e.g. MasterSword 0.2.3 updating mastersword_vk.dll while mastersword.exe stays 0.2.2)
+    // embed the newer version in the companion DLL; pick whichever binary carries the newer version.
+    std::string v1 = probe_binary(j.exe, j);
+    std::string v2 = j.dll.empty() ? std::string() : probe_binary(j.dll, j);
+    if (!v2.empty() && (v1.empty() || version_newer(v2, v1))) return v2;
+    return v1;
+}
+
 static int probe_worker(void *p) {
     auto *jobs = (std::vector<ProbeJob> *)p;
     for (const ProbeJob &j : *jobs) {
-        std::string pref = probe_prefix(j.exe);
+        std::string pref = probe_prefix(j.exe, j.dll);
         std::string key = pref.empty() ? std::string() : pref + j.tag_sig;
         std::string v;
         bool cached = false;
@@ -705,9 +748,10 @@ static int probe_worker(void *p) {
         if (!cached && !key.empty()) {
             v = probe_file(j);
             std::lock_guard<std::mutex> l(g_probe_lock);
-            // prune older tag-sig entries for this same exe|size|mtime
+            // prune older entries for this same exe path
+            std::string exe_base = j.exe + "|";
             for (auto it = g_probe_cache.begin(); it != g_probe_cache.end();) {
-                if (it->first.rfind(pref, 0) == 0) it = g_probe_cache.erase(it);
+                if (it->first.rfind(exe_base, 0) == 0) it = g_probe_cache.erase(it);
                 else ++it;
             }
             g_probe_cache[key] = v;
@@ -735,7 +779,8 @@ static void apply_known_versions(const Port &p, std::vector<Install> &v) {
     if (!g_probe_cache_loaded) probe_cache_load();
     std::string sig = port_tags_signature(p);
     for (Install &in : v) {
-        std::string pref = probe_prefix(in.dir + "\\" + p.exe);
+        std::string dll = companion_dll(in.dir, p.id, p.exe);
+        std::string pref = probe_prefix(in.dir + "\\" + p.exe, dll);
         if (pref.empty()) continue;
         std::lock_guard<std::mutex> l(g_probe_lock);
         auto it = g_probe_cache.find(pref + sig);
@@ -743,7 +788,7 @@ static void apply_known_versions(const Port &p, std::vector<Install> &v) {
             in.version = it->second;
             continue;
         }
-        // before github_load_saved() runs, still reuse any v2 cache entry for this exact exe|size|mtime
+        // before github_load_saved() runs, still reuse any v3 cache entry for this exact exe+dll signature
         for (const auto &e : g_probe_cache)
             if (e.first.rfind(pref, 0) == 0 && !e.second.empty()) {
                 in.version = e.second;
@@ -766,14 +811,14 @@ void version_probe_start() {
         for (const Release &r : p.releases) tags.push_back(r.tag);
         if (tags.empty() && p.known_tag) tags.push_back(p.known_tag);
         std::string sig = port_tags_signature(p);
-        std::string stem = lower(p.exe);
-        if (size_t dot = stem.rfind('.'); dot != std::string::npos) stem.resize(dot);
+        std::string stem = exe_stem_of(p.exe);
         for (int pass = 0; pass < 3; ++pass)
             for (const Install &in : p.all) {
                 bool first = !p.installs.empty() && lower(p.installs[0].dir) == lower(in.dir);
                 if ((pass == 0) != first || (pass == 1 && in.dev) || (pass == 2 && !in.dev)) continue;
                 std::string exe = in.dir + "\\" + p.exe;
-                if (exists(exe)) per[i].push_back({i, in.dir, exe, p.id, stem, p.title, sig, tags});
+                std::string dll = companion_dll(in.dir, p.id, p.exe);
+                if (exists(exe)) per[i].push_back({i, in.dir, exe, dll, p.id, stem, p.title, sig, tags});
             }
     }
     auto *jobs = new std::vector<ProbeJob>;
