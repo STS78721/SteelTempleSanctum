@@ -131,6 +131,23 @@
       "deep": "#0E2616",
       "log": "logs\\yatmb.log",
       "settings_url": "https://raw.githubusercontent.com/STS78721/SteelTempleSanctum/main/assets/settings/yatmb.json"
+    },
+    {
+      "id": "orbit",
+      "title": "Orbitals",
+      "name": "ORBIT",
+      "repo": "STS78721/ORBIT",
+      "known_tag": "0.1.0",
+      "known_size": "159 MB",
+      "cover_key": "orbitals",
+      "mono": "ORB",
+      "exe": "orbitals.exe",
+      "launcher": "OrbitalsLauncher.exe",
+      "uninstall_key": "Orbitals",
+      "accent": "#4CC9FF",
+      "deep": "#0A1124",
+      "log": "logs\\orbitals.log",
+      "settings_url": "https://raw.githubusercontent.com/STS78721/SteelTempleSanctum/main/assets/settings/orbit.json"
     }
   ]
 }
