@@ -45,9 +45,34 @@ static bool can_get(int i) {
     return p.installs.empty() && !install_queued(i) && package_of(i) != ASSET_OTHER;
 }
 
+int ports_update_all() {
+    auto &ps = ports();
+    int bn = builtin_port_count();
+    int queued = 0;
+    for (int i = 0; i < bn; ++i) {
+        const Port &port = ps[i];
+        if (port.state() != PORT_UPDATE || install_queued(i)) continue;
+        const Release *r = port.latest();
+        const Install *in = port.best();
+        if (!r || !in) continue;
+        if (const Asset *up = r->find(ASSET_UPDATE)) {
+            install_enqueue(i, *r, *up, JOB_UPDATE, in->dir);
+            ++queued;
+        } else if (const Asset *po = r->find(ASSET_PORTABLE)) {
+            install_enqueue(i, *r, *po, JOB_UPDATE, in->dir);
+            ++queued;
+        } else if (const Asset *w = r->find(ASSET_WIZARD)) {
+            install_enqueue(i, *r, *w, JOB_WIZARD);
+            ++queued;
+        }
+    }
+    return queued;
+}
+
 static void start_downloads() {
     int n = 0;
-    for (int i = 0; i < (int)ports().size(); ++i) {
+    int bn = builtin_port_count();
+    for (int i = 0; i < bn; ++i) {
         if (!g_sel[i] || !can_get(i)) continue;
         const Release *r = ports()[i].latest();
         AssetKind k = package_of(i);
@@ -63,23 +88,39 @@ void ports_frame() {
     App &a = app();
     const Palette &p = pal();
     auto &ps = ports();
-    int n = (int)ps.size();
-    if (g_focus > n) g_focus = n;
+    int n = builtin_port_count();
+    int upd_avail = 0;
+    for (int i = 0; i < n; ++i)
+        if (ps[i].state() == PORT_UPDATE && !install_queued(i)) ++upd_avail;
+    int max_focus = upd_avail > 0 ? n + 1 : n;   // n = Download, n+1 = Update all
+    if (g_focus > max_focus) g_focus = max_focus;
     switch (a.nav) {
-    case NAV_LEFT: if (g_focus < n && g_focus % kCols) { g_focus--; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
-    case NAV_RIGHT: if (g_focus < n - 1 && g_focus % kCols != kCols - 1) { g_focus++; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); break;
+    case NAV_LEFT:
+        if (g_focus == n + 1) { g_focus = n; sound_play(SFX_MOVE); }
+        else if (g_focus < n && g_focus % kCols) { g_focus--; sound_play(SFX_MOVE); }
+        else sound_play(SFX_EDGE);
+        break;
+    case NAV_RIGHT:
+        if (g_focus == n && upd_avail > 0) { g_focus = n + 1; sound_play(SFX_MOVE); }
+        else if (g_focus < n - 1 && g_focus % kCols != kCols - 1) { g_focus++; sound_play(SFX_MOVE); }
+        else sound_play(SFX_EDGE);
+        break;
     case NAV_UP:
-        if (g_focus == n) { g_focus = std::max(0, n - 1); sound_play(SFX_MOVE); }
+        if (g_focus >= n) { g_focus = std::max(0, n - 1); sound_play(SFX_MOVE); }
         else if (g_focus >= kCols) { g_focus -= kCols; sound_play(SFX_MOVE); }
         else sound_play(SFX_EDGE);
         break;
     case NAV_DOWN:
         if (g_focus + kCols < n) { g_focus += kCols; sound_play(SFX_MOVE); }
-        else if (g_focus != n) { g_focus = n; sound_play(SFX_MOVE); }
+        else if (g_focus < n) { g_focus = upd_avail > 0 ? n + 1 : n; sound_play(SFX_MOVE); }
         else sound_play(SFX_EDGE);
         break;
     case NAV_A:
         if (g_focus == n) start_downloads();
+        else if (g_focus == n + 1 && upd_avail > 0) {
+            int q = ports_update_all();
+            if (q > 0) { sound_play(SFX_OK); toast("Queued " + std::to_string(q) + (q == 1 ? " update" : " updates")); go(SCR_DOWNLOADS); return; }
+        }
         else if (can_get(g_focus)) { g_sel[g_focus] = !g_sel[g_focus]; sound_play(g_sel[g_focus] ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); }
         else if (!ps[g_focus].installs.empty()) { a.game = g_focus; go(SCR_GAME); return; }
         else if (install_queued(g_focus)) go(SCR_DOWNLOADS);
@@ -146,25 +187,44 @@ void ports_frame() {
         if (i == g_focus) focus_ring(x, y, cw, ch, 16, 4);
     }
 
-    // the summary and the Download button
+    // the summary and the Download / Update all buttons
     float sy = y0 + ((n + kCols - 1) / kCols) * (ch + gy) + 8;
     rect(96, sy, 1088, 76, p.panel2, 16);
-    std::string s1 = count ? std::to_string(count) + (count == 1 ? " port selected" : " ports selected") : "Nothing selected yet";
+    std::string s1 = count ? std::to_string(count) + (count == 1 ? " port selected" : " ports selected")
+                   : upd_avail ? std::to_string(upd_avail) + (upd_avail == 1 ? " port update available" : " port updates available")
+                   : "Nothing selected yet";
     text(120, sy + 14, 19, p.text, s1.c_str());
-    std::string s2 = (count ? mb(total) + " to download  ·  " : std::string()) + "installs into " + shown_path(library_dir()) +"   (Y changes)";
-    text(120, sy + 42, 14, p.soft, fit(14, s2, 760).c_str());
-    float bw = 210, bx = 1184 - 16 - bw, by = sy + 12;
+    std::string s2 = (count ? mb(total) + " to download  ·  " : std::string()) + "installs into " + shown_path(library_dir()) + "   (Y changes)";
+    text(120, sy + 42, 14, p.soft, fit(14, s2, upd_avail ? 540 : 760).c_str());
+    float right_x = 1184 - 16;
+    if (upd_avail > 0) {
+        std::string ul = "Update all (" + std::to_string(upd_avail) + ")";
+        float uw = text_w(18, ul.c_str()) + 76, ux = right_x - uw, uy = sy + 12;
+        if (hover(ux, uy, uw, 52)) {
+            if (a.mouse_moved && !a.clicked && g_focus != n + 1) { g_focus = n + 1; sound_play(SFX_MOVE); }
+            if (a.clicked) {
+                int q = ports_update_all();
+                if (q > 0) { sound_play(SFX_OK); toast("Queued " + std::to_string(q) + (q == 1 ? " update" : " updates")); go(SCR_DOWNLOADS); return; }
+            }
+        }
+        rect(ux, uy, uw, 52, p.accent, 26);
+        icon(IC_UP, ux + 30, uy + 26, 20, IM_COL32_WHITE);
+        text(ux + 52, uy + 15, 18, IM_COL32_WHITE, ul.c_str());
+        if (g_focus == n + 1) focus_ring(ux, uy, uw, 52, 26, 4);
+        right_x = ux - 12;
+    }
+    float bw = 200, bx = right_x - bw, by = sy + 12;
     if (hover(bx, by, bw, 52)) {
         if (a.mouse_moved && !a.clicked && g_focus != n) { g_focus = n; sound_play(SFX_MOVE); }
         if (a.clicked) start_downloads();
     }
     rect(bx, by, bw, 52, count ? p.accent : p.line, 26);
-    icon(IC_DOWNLOAD, bx + 34, by + 26, 20, IM_COL32_WHITE);
-    text(bx + 56, by + 14, 19, IM_COL32_WHITE, count ? ("Download " + std::to_string(count)).c_str() : "Download");
+    icon(IC_DOWNLOAD, bx + 32, by + 26, 20, IM_COL32_WHITE);
+    text(bx + 54, by + 14, 19, IM_COL32_WHITE, count ? ("Download " + std::to_string(count)).c_str() : "Download");
     if (g_focus == n) focus_ring(bx, by, bw, 52, 26, 4);
 
     if (g_focus < n && can_get(g_focus)) hint_bar({{NAV_A, g_sel[g_focus] ? "Untick" : "Tick"}, {NAV_X, "Package"}, {NAV_PLUS, "Download"}, {NAV_B, "Back"}});
-    else hint_bar({{NAV_A, g_focus == n ? "Download" : "Open"}, {NAV_Y, "Install folder"}, {NAV_B, "Back"}});
+    else hint_bar({{NAV_A, g_focus == n + 1 ? "Update all" : g_focus == n ? "Download" : "Open"}, {NAV_Y, "Install folder"}, {NAV_B, "Back"}});
 }
 
 // ======================= Downloads

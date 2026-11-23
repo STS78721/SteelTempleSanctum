@@ -20,4 +20,17 @@ void input_refresh_style();    // after Button icons changes
 enum Haptic { HAP_TICK, HAP_OK, HAP_BACK, HAP_LAUNCH, HAP_ERROR };
 void input_rumble(Haptic h, bool force = false);
 
+// Active stick deadzone threshold (0.35 / 0.55 / 0.72 based on cfg().stick_deadzone)
+float input_deadzone_threshold();
+
+// Timestamp (app().now) of the most recent controller, keyboard, or mouse input (for OLED idle dim)
+double input_last_activity();
+void input_note_activity();
+
+// Wireless controller battery info (returns true when a connected gamepad reports battery status)
+bool input_pad_battery(int *pct_out, bool *charging_out);
+
+// While a game is running: checks if Back+Start+L+R are held for 2.0 s to force-close a hung game
+bool input_poll_force_close(double now);
+
 }  // namespace sanctum

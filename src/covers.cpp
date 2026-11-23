@@ -28,13 +28,45 @@ static SDL_Renderer *g_r;
 static std::map<std::string, SDL_Texture *> g_tex;
 static std::mutex g_lock;
 static std::vector<Decoded> g_ready;
-static std::set<std::string> g_matched_ids;   // set by a finished worker: the ports this folder has art for
+static std::set<std::string> g_matched_ids;   // set by a finished worker: the ports that currently have art
 static bool g_finished = false;
 static std::atomic<int> g_generation{0};
 static std::atomic<int> g_matched{0};
 static std::atomic<bool> g_running{false};
 static std::string g_watch_sig;               // the folder's pictures (names, sizes, times) when last read
 static double g_watch_next = 0;
+
+bool load_image_rgba(const std::string &path, int max_dim, int &w_out, int &h_out, std::vector<unsigned char> &rgba_out) {
+    int w = 0, h = 0, n = 0;
+    unsigned char *px = stbi_load(path.c_str(), &w, &h, &n, 4);
+    if (!px || w <= 0 || h <= 0) {
+        if (px) stbi_image_free(px);
+        return false;
+    }
+    int f = 1;
+    if (max_dim > 0) {
+        int big = w > h ? w : h;
+        while (big / (f * 2) >= max_dim && f < 8) f *= 2;
+    }
+    w_out = std::max(1, w / f);
+    h_out = std::max(1, h / f);
+    rgba_out.resize((size_t)w_out * h_out * 4);
+    if (f == 1) {
+        SDL_memcpy(rgba_out.data(), px, (size_t)w * h * 4);
+    } else {
+        for (int y = 0; y < h_out; ++y)
+            for (int x = 0; x < w_out; ++x)
+                for (int c = 0; c < 4; ++c) {
+                    int sum = 0;
+                    for (int yy = 0; yy < f; ++yy)
+                        for (int xx = 0; xx < f; ++xx)
+                            sum += px[((size_t)(y * f + yy) * w + (x * f + xx)) * 4 + c];
+                    rgba_out[((size_t)y * w_out + x) * 4 + c] = (unsigned char)(sum / (f * f));
+                }
+    }
+    stbi_image_free(px);
+    return true;
+}
 
 static std::string key_of(const char *name) {   // letters and digits, lower case (also drops "꞉", "’" and the like)
     std::string k;
@@ -90,20 +122,25 @@ static std::vector<ImgFile> collect_images(const std::string &dir, int max_depth
     return out;
 }
 
+struct PortSnap {
+    std::string id, cover_key, name, mono, custom_cover;
+};
+
 // How well a file's name fits a port: 3 its full title, 2 the port's own name, 1 the short name on its own;
 // 0 no match. The short name must be the whole name ("OoT.png"), so "ff" never matches "Diff.png".
-static int score(const Port &p, const std::string &file) {
+static int score(const PortSnap &p, const std::string &file) {
     std::string stem = file.substr(0, file.find_last_of('.'));
     std::string k = key_of(stem.c_str());
-    if (k.find(p.cover_key) != std::string::npos) return 3;
-    std::string name = key_of(p.name);
-    if (name.size() >= 4 && k.find(name) != std::string::npos) return 2;
-    if (k == key_of(p.mono)) return 1;
+    if (!p.cover_key.empty() && k.find(p.cover_key) != std::string::npos) return 3;
+    std::string name = key_of(p.name.c_str());
+    if (name.size() >= 4 && name != "pcgame" && k.find(name) != std::string::npos) return 2;
+    if (!p.mono.empty() && k == key_of(p.mono.c_str())) return 1;
     return 0;
 }
 
 struct Job {
     std::string dir;
+    std::vector<PortSnap> snaps;
     int generation;
 };
 
@@ -111,37 +148,29 @@ static int worker(void *p) {
     Job *job = (Job *)p;
     std::vector<ImgFile> files = collect_images(job->dir, 3);
     std::set<std::string> matched;
-    for (Port &port : ports()) {
-        const ImgFile *best = nullptr;
-        int best_score = 0;
-        for (const ImgFile &f : files) {
-            int s = score(port, f.name);
-            if (!s) continue;
-            bool better = s > best_score ||
-                          (s == best_score && best &&
-                           (f.name.size() < best->name.size() ||
-                            (f.name.size() == best->name.size() && f.depth < best->depth)));
-            if (better) best = &f, best_score = s;
+    for (const PortSnap &port : job->snaps) {
+        std::string chosen_path;
+        if (!port.custom_cover.empty() && SDL_GetPathInfo(port.custom_cover.c_str(), nullptr)) {
+            chosen_path = port.custom_cover;
+        } else if (!files.empty()) {
+            const ImgFile *best = nullptr;
+            int best_score = 0;
+            for (const ImgFile &f : files) {
+                int s = score(port, f.name);
+                if (!s) continue;
+                bool better = s > best_score ||
+                              (s == best_score && best &&
+                               (f.name.size() < best->name.size() ||
+                                (f.name.size() == best->name.size() && f.depth < best->depth)));
+                if (better) best = &f, best_score = s;
+            }
+            if (best) chosen_path = job->dir + "\\" + best->rel;
         }
-        if (!best) continue;
-        int w, h, n;
-        unsigned char *px = stbi_load((job->dir + "\\" + best->rel).c_str(), &w, &h, &n, 4);
-        if (!px) continue;
+        if (chosen_path.empty()) continue;
+        Decoded d;
+        d.id = port.id;
+        if (!load_image_rgba(chosen_path, 512, d.w, d.h, d.rgba)) continue;
         matched.insert(port.id);
-        Decoded d{port.id, w, h, {}};
-        // shrink huge covers to ~512px: sharp at tile size, a fraction of the memory, uploads in no time
-        int f = (w >= 2048 && h >= 2048) ? 4 : (w >= 1024 && h >= 1024) ? 2 : 1;
-        d.w = w / f, d.h = h / f;
-        d.rgba.resize((size_t)d.w * d.h * 4);
-        for (int y = 0; y < d.h; ++y)
-            for (int x = 0; x < d.w; ++x)
-                for (int c = 0; c < 4; ++c) {
-                    int sum = 0;
-                    for (int yy = 0; yy < f; ++yy)
-                        for (int xx = 0; xx < f; ++xx) sum += px[((size_t)(y * f + yy) * w + (x * f + xx)) * 4 + c];
-                    d.rgba[((size_t)y * d.w + x) * 4 + c] = (unsigned char)(sum / (f * f));
-                }
-        stbi_image_free(px);
         std::lock_guard<std::mutex> l(g_lock);
         if (job->generation == g_generation) g_ready.push_back(std::move(d));
     }
@@ -176,6 +205,7 @@ void covers_init(SDL_Renderer *r) {
 }
 
 void covers_reload() {
+    if (!g_r) return;
     // the covers on screen stay until their replacements are ready (no flash of empty tiles)
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -183,16 +213,24 @@ void covers_reload() {
         g_finished = false;
     }
     int gen = ++g_generation;
-    if (cfg().cover_dir.empty()) {
+    bool has_custom = false;
+    for (auto &e : cfg().port_covers) if (!e.second.empty()) { has_custom = true; break; }
+    if (cfg().cover_dir.empty() && !has_custom) {
         for (auto &t : g_tex) SDL_DestroyTexture(t.second);
         g_tex.clear();
         g_matched = 0;
         g_watch_sig.clear();
         return;
     }
-    g_watch_sig = signature(cfg().cover_dir);
+    g_watch_sig = cfg().cover_dir.empty() ? std::string() : signature(cfg().cover_dir);
+    std::vector<PortSnap> snaps;
+    for (const Port &port : ports()) {
+        auto it = cfg().port_covers.find(port.id);
+        snaps.push_back({port.id, port.cover_key ? port.cover_key : "", port.name ? port.name : "",
+                         port.mono ? port.mono : "", it == cfg().port_covers.end() ? std::string() : it->second});
+    }
     g_running = true;
-    Job *job = new Job{cfg().cover_dir, gen};
+    Job *job = new Job{cfg().cover_dir, std::move(snaps), gen};
     SDL_Thread *t = SDL_CreateThread(worker, "covers", job);
     if (t) SDL_DetachThread(t);
     else { delete job; g_running = false; }

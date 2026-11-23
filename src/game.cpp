@@ -3,7 +3,9 @@
 // needed. Release notes: every release from GitHub, the list on the left, the notes on the right; A moves into the
 // notes, up/down scroll them, B comes back out.
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <ctime>
 #include <map>
 #include <mutex>
 
@@ -25,9 +27,51 @@ static const int kTabN = 5;
 static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0, g_file_row = 0;
 static float g_tab_x = 0, g_scroll = 0, g_scroll_to = 0, g_notes_max = 0;
 static int g_notes_game = -1, g_notes_rel = -1;
-static double g_uninstall_armed = -10;
+static double g_uninstall_armed = -10, g_restore_save_armed = -10;
 enum { ROW_ACTIONS, ROW_COPIES, ROW_RELEASES, ROW_NOTES, ROW_SETTINGS, ROW_MODS, ROW_FILES };
 static int g_row = ROW_ACTIONS;
+
+// ---- lightweight inline text modal for per-game custom launch args & env overrides
+static bool g_prompt_open = false;
+static int g_prompt_kind = 0;   // 0 = launch_args, 1 = launch_env
+static std::string g_prompt_port, g_prompt_buf;
+
+static void prompt_start(int kind, const std::string &port_id, const std::string &initial) {
+    g_prompt_open = true;
+    g_prompt_kind = kind;
+    g_prompt_port = port_id;
+    g_prompt_buf = initial;
+    app().text_entry = true;
+    SDL_StartTextInput(app().window);
+    sound_play(SFX_OK);
+}
+
+static void prompt_close() {
+    g_prompt_open = false;
+    app().text_entry = false;
+    SDL_StopTextInput(app().window);
+}
+
+static std::string latest_save_backup(const std::string &port_id, int *count_out = nullptr) {
+    std::string bdir = config_dir() + "backups\\" + port_id;
+    int n = 0;
+    char **names = SDL_GlobDirectory((bdir + "\\").c_str(), "*.zip", SDL_GLOB_CASEINSENSITIVE, &n);
+    std::vector<std::string> zips;
+    for (int i = 0; names && i < n; ++i)
+        if (names[i] && strncmp(names[i], "save-", 5) == 0) zips.push_back(names[i]);
+    SDL_free(names);
+    std::sort(zips.begin(), zips.end());
+    if (count_out) *count_out = (int)zips.size();
+    return zips.empty() ? std::string() : (bdir + "\\" + zips.back());
+}
+
+void game_open_tab(int port, int tab) {
+    app().game = port;
+    g_last_game = port;
+    g_tab = SDL_clamp(tab, 0, kTabN - 1);
+    g_row = ROW_ACTIONS, g_action = 0, g_file_row = 0;
+    go(SCR_GAME);
+}
 
 // ---- async disk size measurement for Files & storage
 struct SizeInfo {
@@ -208,10 +252,18 @@ void game_frame() {
     if (lr && !running && (lr->verdict == RUN_KNOWN || lr->verdict == RUN_FIXED) && !lr->issue.empty())
         acts.push_back({IC_INFO, "Issue " + lr->issue, ACT_ISSUE});
     if (!running && in && in->launcher && can_play(port, *in)) acts.push_back({IC_GEAR, "Port's own launcher", ACT_LAUNCHER});
-    acts.push_back({IC_INFO, "Open on GitHub", ACT_GITHUB});
+    if (!port.custom) acts.push_back({IC_INFO, "Open on GitHub", ACT_GITHUB});
     // the buttons changed (an update finished, a download started): focus goes back to the main one
     static size_t last_count = 0;
     if (acts.size() != last_count) g_action = 0, last_count = acts.size();
+
+    // If the inline launch-options text modal is open, hold screen nav so the modal owns input
+    Nav modal_nav = NAV_NONE;
+    bool modal_click = false;
+    if (g_prompt_open) {
+        modal_nav = a.nav, modal_click = a.clicked;
+        a.nav = NAV_NONE, a.clicked = false;
+    }
 
     auto run = [&](int id) {
         switch (id) {
@@ -259,23 +311,49 @@ void game_frame() {
     bool notes_here = g_tab == 1 && !port.releases.empty();
     // files & storage action list (needed for Up/Down/A handling)
     struct FileRow { std::string label, value; int id; };
-    enum { F_OPEN_DIR, F_OPEN_LOGS, F_VERIFY, F_BACKUP_INI, F_RESTORE_INI, F_UNINSTALL };
+    enum { F_OPEN_DIR, F_OPEN_LOGS, F_VERIFY, F_BACKUP_SAVES, F_RESTORE_SAVES, F_BACKUP_INI, F_RESTORE_INI,
+           F_CUSTOM_COVER, F_CLEAR_COVER, F_LAUNCH_ARGS, F_LAUNCH_ENV, F_PIN, F_UNINSTALL };
     std::vector<FileRow> frows;
-    std::string f_ini, f_bak, f_miss;
+    std::string f_ini, f_bak, f_miss, f_save_dir, f_save_bak;
+    int f_save_cnt = 0;
     if (g_tab == 4 && in) {
         f_miss = missing_for_play(port, *in);
         f_ini = port_settings_ini_path(a.game);
         f_bak = f_ini.empty() ? std::string() : f_ini + ".sanctum-bak";
+        f_save_dir = port_save_dir(port, *in);
+        f_save_bak = demo_mode() ? std::string() : latest_save_backup(port.id, &f_save_cnt);
         bool has_logs = SDL_GetPathInfo((in->dir + "\\logs").c_str(), nullptr);
         frows.push_back({"Open install folder", "Explorer", F_OPEN_DIR});
-        frows.push_back({"Open logs folder", has_logs ? "logs\\" : "Install folder", F_OPEN_LOGS});
+        if (!port.custom) frows.push_back({"Open logs folder", has_logs ? "logs\\" : "Install folder", F_OPEN_LOGS});
         frows.push_back({"Verify required files", f_miss.empty() ? "All present" : "Missing files", F_VERIFY});
+        if (!f_save_dir.empty()) {
+            frows.push_back({"Back up save files", f_save_cnt ? (std::to_string(f_save_cnt) + " saved") : "Create zip backup", F_BACKUP_SAVES});
+            if (!f_save_bak.empty()) {
+                bool r_armed = a.now - g_restore_save_armed < 4.0;
+                frows.push_back({"Restore latest save backup", r_armed ? "Press again to restore" : "Safe pre-backup first", F_RESTORE_SAVES});
+            }
+        }
         if (!f_bak.empty() && SDL_GetPathInfo(f_bak.c_str(), nullptr))
             frows.push_back({"Restore settings backup", ".sanctum-bak", F_RESTORE_INI});
         else if (!f_ini.empty() && SDL_GetPathInfo(f_ini.c_str(), nullptr))
             frows.push_back({"Back up settings", "Save .sanctum-bak", F_BACKUP_INI});
+        auto cov_it = cfg().port_covers.find(port.id);
+        bool has_cov = cov_it != cfg().port_covers.end() && !cov_it->second.empty();
+        frows.push_back({"Custom cover art", has_cov ? "Change image..." : "Pick image...", F_CUSTOM_COVER});
+        if (has_cov) frows.push_back({"Clear custom cover art", "Use folder / default", F_CLEAR_COVER});
+        auto arg_it = cfg().launch_args.find(port.id);
+        std::string cur_args = arg_it == cfg().launch_args.end() ? "" : arg_it->second;
+        frows.push_back({"Custom launch arguments", cur_args.empty() ? "None" : fit(14, cur_args, 240), F_LAUNCH_ARGS});
+        auto env_it = cfg().launch_env.find(port.id);
+        std::string cur_env = env_it == cfg().launch_env.end() ? "" : env_it->second;
+        frows.push_back({"Custom environment variables", cur_env.empty() ? "None" : fit(14, cur_env, 240), F_LAUNCH_ENV});
+        bool pinned = cfg().pinned.count(port.id) > 0;
+        frows.push_back({"Pin to front on Home", pinned ? "Pinned" : "Off", F_PIN});
         bool armed = a.now - g_uninstall_armed < 4.0;
-        frows.push_back({"Uninstall this copy", armed ? "Press again to move to Recycle Bin" : "Moves to Recycle Bin", F_UNINSTALL});
+        if (port.custom)
+            frows.push_back({"Remove shortcut from Sanctum", armed ? "Press again to remove" : "Keeps game files on disk", F_UNINSTALL});
+        else
+            frows.push_back({"Uninstall this copy", armed ? "Press again to move to Recycle Bin" : "Moves to Recycle Bin", F_UNINSTALL});
         if (g_file_row >= (int)frows.size()) g_file_row = std::max(0, (int)frows.size() - 1);
     }
 
@@ -300,6 +378,54 @@ void game_frame() {
             folder_size_cached(in->dir, true);
             if (m.empty()) { sound_play(SFX_TOGGLE_ON); toast("All required game files are present"); }
             else { sound_play(SFX_ERROR); toast("Missing: " + m, 4); }
+            break;
+        }
+        case F_BACKUP_SAVES: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: saves unchanged"); break; }
+            if (running) { sound_play(SFX_ERROR); toast("Close the game before backing up saves"); break; }
+            if (f_save_dir.empty()) { sound_play(SFX_ERROR); toast("No save folder found yet"); break; }
+            std::string bdir = config_dir() + "backups\\" + port.id;
+            SDL_CreateDirectory((config_dir() + "backups").c_str());
+            SDL_CreateDirectory(bdir.c_str());
+            time_t now = time(nullptr);
+            struct tm lt{};
+            localtime_s(&lt, &now);
+            char stamp[32];
+            strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &lt);
+            std::string dst = bdir + "\\save-" + stamp + ".zip";
+            int files = 0;
+            if (zip_folder(f_save_dir, dst, &files)) {
+                sound_play(SFX_TOGGLE_ON);
+                toast("Backed up " + std::to_string(files) + " save files to backups\\" + std::string(port.id), 3.5);
+            } else {
+                sound_play(SFX_ERROR);
+                toast("No save files found to back up");
+            }
+            break;
+        }
+        case F_RESTORE_SAVES: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: saves unchanged"); break; }
+            if (running) { sound_play(SFX_ERROR); toast("Close the game first"); break; }
+            if (f_save_bak.empty() || f_save_dir.empty()) { sound_play(SFX_ERROR); toast("No save backup found"); break; }
+            if (a.now - g_restore_save_armed < 4.0) {
+                g_restore_save_armed = -10;
+                // Safety pre-backup before restoring
+                std::string bdir = config_dir() + "backups\\" + port.id;
+                zip_folder(f_save_dir, bdir + "\\pre-restore.zip");
+                std::string stage = local_dir() + "save-restore";
+                remove_tree(stage);
+                SDL_CreateDirectory(stage.c_str());
+                std::atomic<bool> cancel{false};
+                std::string err = unzip(f_save_bak, stage, cancel);
+                if (err.empty()) err = overlay(stage, f_save_dir);
+                remove_tree(stage);
+                if (err.empty()) { sound_play(SFX_TOGGLE_ON); toast("Restored saves from latest backup", 3.5); }
+                else { sound_play(SFX_ERROR); toast("Restore failed: " + err, 4); }
+            } else {
+                g_restore_save_armed = a.now;
+                sound_play(SFX_ERROR);
+                toast("Press again to restore saves (current saves are backed up first)", 4);
+            }
             break;
         }
         case F_BACKUP_INI: {
@@ -331,11 +457,62 @@ void game_frame() {
             }
             break;
         }
+        case F_CUSTOM_COVER: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: covers unchanged"); break; }
+            std::string img = pick_open_file(a.window, "Choose cover image", "Images", "*.png;*.jpg;*.jpeg;*.bmp");
+            if (!img.empty()) {
+                cfg().port_covers[port.id] = img;
+                config_save();
+                covers_reload();
+                sound_play(SFX_TOGGLE_ON);
+                toast("Custom cover art updated");
+            }
+            break;
+        }
+        case F_CLEAR_COVER:
+            cfg().port_covers.erase(port.id);
+            config_save();
+            covers_reload();
+            sound_play(SFX_TOGGLE_OFF);
+            toast("Cleared custom cover art");
+            break;
+        case F_LAUNCH_ARGS: {
+            auto it = cfg().launch_args.find(port.id);
+            prompt_start(0, port.id, it == cfg().launch_args.end() ? "" : it->second);
+            break;
+        }
+        case F_LAUNCH_ENV: {
+            auto it = cfg().launch_env.find(port.id);
+            prompt_start(1, port.id, it == cfg().launch_env.end() ? "" : it->second);
+            break;
+        }
+        case F_PIN:
+            if (cfg().pinned.count(port.id)) {
+                cfg().pinned.erase(port.id);
+                sound_play(SFX_TOGGLE_OFF);
+                toast("Unpinned from Home");
+            } else {
+                cfg().pinned.insert(port.id);
+                sound_play(SFX_TOGGLE_ON);
+                toast("Pinned to front on Home");
+            }
+            config_save();
+            break;
         case F_UNINSTALL: {
             if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: nothing deleted"); break; }
             if (running) { sound_play(SFX_ERROR); toast("Close the game first"); break; }
             if (a.now - g_uninstall_armed < 4.0) {
                 g_uninstall_armed = -10;
+                if (port.custom) {
+                    if (catalog_remove_custom(a.game)) {
+                        sound_play(SFX_BACK);
+                        toast("Removed custom shortcut");
+                        if (a.game >= (int)ports().size()) a.game = std::max(0, (int)ports().size() - 1);
+                        go_back(true);
+                        return;
+                    }
+                    break;
+                }
                 std::string target = in->dir;
                 if (recycle_path(target)) {
                     catalog_remove(a.game, target);
@@ -349,7 +526,7 @@ void game_frame() {
             } else {
                 g_uninstall_armed = a.now;
                 sound_play(SFX_ERROR);
-                toast("Press again to move " + in->dir + " to Recycle Bin", 4);
+                toast(port.custom ? "Press again to remove shortcut from Sanctum" : ("Press again to move " + in->dir + " to Recycle Bin"), 4);
             }
             break;
         }
@@ -422,7 +599,7 @@ void game_frame() {
         if (g_tab == 1 && (g_row == ROW_RELEASES || g_row == ROW_NOTES) && !port.releases.empty())
             install_release(a.game, port, in, port.releases[g_rel], busy);
         break;
-    case NAV_Y: run(ACT_GITHUB); break;
+    case NAV_Y: if (!port.custom) run(ACT_GITHUB); break;
     case NAV_B:
         if (g_row == ROW_NOTES) { g_row = ROW_RELEASES; sound_play(SFX_BACK); break; }
         if (g_row != ROW_ACTIONS) { g_row = ROW_ACTIONS; sound_play(SFX_BACK); break; }
@@ -441,10 +618,28 @@ void game_frame() {
         progress_bar(96, 404, 290, 10, f, port.colours.accent);
     }
 
+    // Per-game Time Played stats card neatly below the cover art
+    {
+        float sy = 452, sw = 330, sh = 172;
+        rect(76, sy, sw, sh, p.panel, 16);
+        rect(92, sy, sw - 32, 3, port.colours.accent, 1.5f);
+        text(96, sy + 18, 12, p.dim, "TIME PLAYED");
+        text(76 + sw - 20, sy + 18, 12, p.dim, fit(12, demo_mode() ? "Player 1" : cfg().profile, 140).c_str(), 1);
+        std::string dur = demo_mode() ? "3 h 40 min" : played_duration_short(a.game);
+        std::string lp  = demo_mode() ? "Today" : last_played_short(a.game);
+        int sess = demo_mode() ? 6 : played_sessions(a.game);
+        text(96, sy + 42, 28, p.text, fit(28, dur, sw - 40).c_str());
+        rect(96, sy + 88, sw - 40, 1, p.line);
+        text(96, sy + 102, 14, p.soft, "Last played");
+        text(76 + sw - 20, sy + 102, 14, p.text, lp.c_str(), 1);
+        text(96, sy + 132, 14, p.soft, "Sessions");
+        text(76 + sw - 20, sy + 132, 14, p.text, sess > 0 ? std::to_string(sess).c_str() : "—", 1);
+    }
+
     float x = 452;
-    text(x, 104, 15, port.colours.accent, (std::string("STEELTEMPLE  ") + port.name).c_str());
+    text(x, 104, 15, port.colours.accent, port.custom ? "CUSTOM PC GAME" : (std::string("STEELTEMPLE  ") + port.name).c_str());
     text(x, 128, 38, p.text, fit(38, port.title, 780).c_str());
-    text(x, 178, 16, p.soft, (std::string("github.com/") + port.repo).c_str());
+    text(x, 178, 16, p.soft, port.custom ? port.exe : (std::string("github.com/") + port.repo).c_str());
 
     float cx = x;
     auto chip = [&](const std::string &s, ImU32 fg, ImU32 bg) {
@@ -524,9 +719,6 @@ void game_frame() {
             if (lr->verdict == RUN_NO_START)
                 text(x + 46, by + 30 + (lr->detail.empty() ? 0 : 20), 13, p.dim, "Its own launcher (Set up) can check the game files.");
             by += ch + 10;
-        } else if (in && last_played(a.game)) {
-            text(x, by, 15, p.soft, played_text(a.game).c_str());
-            by += 28;
         }
         if (port.installs.empty()) {
             text(x, by, 17, p.soft, "Not found on this PC. Sanctum looked in the Setup Wizards' entries and on every drive.");
@@ -697,7 +889,57 @@ void game_frame() {
     else if (g_row == ROW_FILES) hint_bar({{NAV_A, "OK"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_NOTES && rel_installable) hint_bar({{NAV_X, "Install version"}, {NAV_Y, "Open on GitHub"}, {NAV_B, "Back to the list"}});
     else if (g_row == ROW_NOTES) hint_bar({{NAV_Y, "Open on GitHub"}, {NAV_B, "Back to the list"}});
+    else if (port.custom) hint_bar({{NAV_A, acts[g_action].label.substr(0, acts[g_action].label.find("  ")).c_str()}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else hint_bar({{NAV_A, acts[g_action].label.substr(0, acts[g_action].label.find("  ")).c_str()}, {NAV_Y, "GitHub"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+
+    // Inline text-input modal for custom launch args / env overrides
+    if (g_prompt_open) {
+        if (!a.typed.empty()) {
+            for (char c : a.typed)
+                if ((unsigned char)c >= 0x20 && g_prompt_buf.size() < 240) g_prompt_buf += c;
+            sound_play(SFX_KEY);
+        }
+        if (a.key_back && !g_prompt_buf.empty()) { g_prompt_buf.pop_back(); sound_play(SFX_KEY); }
+        bool save = a.key_enter || modal_nav == NAV_A;
+        bool cancel = a.key_escape || modal_nav == NAV_B;
+        bool clear = modal_nav == NAV_Y;
+        float mw = 720, mh = 240, mx = 640 - mw / 2, my = 360 - mh / 2;
+        if (modal_click) {
+            if (hover(mx + mw - 140, my + mh - 64, 116, 42)) save = true;
+            else if (hover(mx + mw - 268, my + mh - 64, 116, 42)) clear = true;
+            else if (hover(mx + 24, my + mh - 64, 116, 42) || !hover(mx, my, mw, mh)) cancel = true;
+        }
+        if (clear) { g_prompt_buf.clear(); sound_play(SFX_BACK); }
+        if (save) {
+            auto &mp = g_prompt_kind == 0 ? cfg().launch_args : cfg().launch_env;
+            if (g_prompt_buf.empty()) mp.erase(g_prompt_port);
+            else mp[g_prompt_port] = g_prompt_buf;
+            config_save();
+            prompt_close();
+            sound_play(SFX_TOGGLE_ON);
+            toast(g_prompt_kind == 0 ? "Saved custom launch arguments" : "Saved custom environment variables");
+        } else if (cancel) {
+            prompt_close();
+            sound_play(SFX_BACK);
+        } else {
+            rect(0, 0, 1280, 720, IM_COL32(0, 0, 0, 155));
+            rect(mx, my, mw, mh, p.bg2, 20);
+            text(mx + 28, my + 22, 22, p.text, g_prompt_kind == 0 ? "Custom launch arguments" : "Custom environment variables");
+            text(mx + 28, my + 54, 14, p.soft,
+                 g_prompt_kind == 0 ? "Example: --windowed --fps=120  (type on keyboard, Enter saves)"
+                                    : "Example: KEY=VALUE;OTHER=1  (separated by semicolons, Enter saves)");
+            rect(mx + 28, my + 90, mw - 56, 52, p.panel, 12);
+            frame(mx + 28, my + 90, mw - 56, 52, p.focus, 12, 2.5f);
+            std::string shown = g_prompt_buf + (std::fmod(a.now, 1.0) < 0.5 ? "|" : "");
+            text(mx + 44, my + 106, 17, p.text, fit(17, shown, mw - 88).c_str());
+            rect(mx + 24, my + mh - 64, 116, 42, p.panel, 21);
+            text(mx + 82, my + mh - 52, 16, p.soft, "Cancel", 0.5f);
+            rect(mx + mw - 268, my + mh - 64, 116, 42, p.panel, 21);
+            text(mx + mw - 210, my + mh - 52, 16, p.warn, "Clear", 0.5f);
+            rect(mx + mw - 140, my + mh - 64, 116, 42, p.accent, 21);
+            text(mx + mw - 82, my + mh - 52, 16, IM_COL32_WHITE, "Save", 0.5f);
+        }
+    }
 }
 
 }  // namespace sanctum

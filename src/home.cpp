@@ -10,6 +10,7 @@
 #include "github.h"
 #include "install.h"
 #include "launch.h"
+#include "port_settings.h"
 #include "sound.h"
 
 namespace sanctum {
@@ -21,27 +22,38 @@ struct DockItem {
     const char *label;
 };
 static const DockItem kDock[] = {
-    {IC_NEWS, "Releases & news"}, {IC_STORE, "Get ports"}, {IC_DOWNLOAD, "Downloads"}, {IC_MODS, "Mods"}, {IC_PAD, "Controllers"},
-    {IC_GEAR, "System Settings"}, {IC_POWER, "Power"},
+    {IC_NEWS, "Releases & news"}, {IC_STORE, "Get ports"}, {IC_DOWNLOAD, "Downloads"}, {IC_ALBUM, "Album"},
+    {IC_MODS, "Mods"}, {IC_PAD, "Controllers"}, {IC_GEAR, "System Settings"}, {IC_POWER, "Power"},
 };
 static const int kDockN = sizeof kDock / sizeof kDock[0];
 
 static int g_zone = Z_ROW, g_dock = 0, g_prof_sel = 0;
 static float g_scroll = 0, g_tint_t = 0;
 static ImU32 g_tint = 0;
-static float g_pop[16];             // each tile's grow when focused
+static float g_pop[64];             // each tile's grow when focused
 static bool g_power = false;        // the Power menu is open
 static int g_power_sel = 0;
+
+// ---- Home quick-options menu (X on a port tile)
+static bool g_quick = false;
+static int g_quick_port = -1, g_quick_sel = 0;
+enum { Q_PLAY, Q_UPDATE, Q_DETAILS, Q_SETTINGS, Q_MODS, Q_PIN, Q_FOLDER, Q_REMOVE_CUSTOM };
+struct QuickItem {
+    Icon icon;
+    std::string label;
+    int id;
+};
 
 static void open_dock(int i) {
     switch (i) {
     case 0: go(SCR_NEWS); break;
     case 1: go(SCR_PORTS); break;
     case 2: go(SCR_DOWNLOADS); break;
-    case 3: mods_open(-1); break;
-    case 4: go(SCR_CONTROLLERS); break;
-    case 5: go(SCR_SETTINGS); break;
-    case 6:   // the press that opens the menu must not also pick in it
+    case 3: album_open(); break;
+    case 4: mods_open(-1); break;
+    case 5: go(SCR_CONTROLLERS); break;
+    case 6: go(SCR_SETTINGS); break;
+    case 7:   // the press that opens the menu must not also pick in it
         g_power = true, g_power_sel = 1;   // Cancel is the safe default
         sound_play(SFX_OK);
         app().nav = NAV_NONE, app().clicked = false;
@@ -80,19 +92,140 @@ static void power_frame() {
     }
 }
 
+static void quick_frame() {
+    App &a = app();
+    const Palette &p = pal();
+    if (g_quick_port < 0 || g_quick_port >= (int)ports().size()) { g_quick = false; return; }
+    Port &port = ports()[g_quick_port];
+    const Install *in = port.best();
+    PortState st = port.state();
+    bool pinned = cfg().pinned.count(port.id) > 0;
+
+    std::vector<QuickItem> items;
+    if (in) items.push_back({IC_PLAY, can_play(port, *in) ? "Play now" : "Set up", Q_PLAY});
+    else items.push_back({IC_DOWNLOAD, "Download port", Q_PLAY});
+    if (st == PORT_UPDATE && !install_queued(g_quick_port))
+        items.push_back({IC_UP, "Update to " + port.latest_tag(), Q_UPDATE});
+    items.push_back({IC_INFO, "Open game page", Q_DETAILS});
+    if (in && !port.custom) items.push_back({IC_GEAR, "Port settings", Q_SETTINGS});
+    if (in && !port.custom) items.push_back({IC_MODS, "Manage mods", Q_MODS});
+    items.push_back({IC_PIN, pinned ? "Unpin from front" : "Pin to front", Q_PIN});
+    if (in) items.push_back({IC_FOLDER, "Open install folder", Q_FOLDER});
+    if (port.custom) items.push_back({IC_CLOSE, "Remove shortcut", Q_REMOVE_CUSTOM});
+
+    int n = (int)items.size();
+    if (g_quick_sel >= n) g_quick_sel = std::max(0, n - 1);
+
+    auto run = [&](int id) {
+        g_quick = false;
+        a.nav = NAV_NONE, a.clicked = false;
+        switch (id) {
+        case Q_PLAY:
+            if (in) launch(a.window, g_quick_port, *in, !can_play(port, *in));
+            else get_ports_select(g_quick_port);
+            break;
+        case Q_UPDATE:
+            if (const Release *r = port.latest(); r && in) {
+                if (const Asset *up = r->find(ASSET_UPDATE)) install_enqueue(g_quick_port, *r, *up, JOB_UPDATE, in->dir);
+                else if (const Asset *po = r->find(ASSET_PORTABLE)) install_enqueue(g_quick_port, *r, *po, JOB_UPDATE, in->dir);
+                else if (const Asset *w = r->find(ASSET_WIZARD)) install_enqueue(g_quick_port, *r, *w, JOB_WIZARD);
+                sound_play(SFX_OK);
+                toast("Queued update for " + std::string(port.name));
+                go(SCR_DOWNLOADS);
+            }
+            break;
+        case Q_DETAILS:
+            a.game = g_quick_port;
+            go(SCR_GAME);
+            break;
+        case Q_SETTINGS:
+            if (port_settings(port.id)) port_settings_open(g_quick_port);
+            else game_open_tab(g_quick_port, 2);
+            break;
+        case Q_MODS:
+            mods_open(g_quick_port);
+            break;
+        case Q_PIN:
+            if (cfg().pinned.count(port.id)) {
+                cfg().pinned.erase(port.id);
+                sound_play(SFX_TOGGLE_OFF);
+                toast("Unpinned " + std::string(port.title));
+            } else {
+                cfg().pinned.insert(port.id);
+                sound_play(SFX_TOGGLE_ON);
+                toast("Pinned " + std::string(port.title) + " to front");
+            }
+            config_save();
+            break;
+        case Q_FOLDER:
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: folders don't open"); }
+            else if (in) { sound_play(SFX_OK); SDL_OpenURL(("file:///" + in->dir).c_str()); }
+            break;
+        case Q_REMOVE_CUSTOM:
+            if (catalog_remove_custom(g_quick_port)) {
+                sound_play(SFX_BACK);
+                toast("Removed custom shortcut");
+                if (a.game >= (int)ports().size()) a.game = std::max(0, (int)ports().size() - 1);
+            }
+            break;
+        }
+    };
+
+    float mw = 420, mh = 114 + n * 52, mx = 640 - mw / 2, my = 360 - mh / 2;
+    if (a.nav == NAV_UP) { if (g_quick_sel > 0) { g_quick_sel--; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); }
+    else if (a.nav == NAV_DOWN) { if (g_quick_sel < n - 1) { g_quick_sel++; sound_play(SFX_MOVE); } else sound_play(SFX_EDGE); }
+    else if (a.nav == NAV_A) { run(items[g_quick_sel].id); return; }
+    else if (a.nav == NAV_B || a.nav == NAV_X || (a.clicked && !hover(mx, my, mw, mh))) {
+        sound_play(SFX_BACK);
+        g_quick = false;
+        a.nav = NAV_NONE, a.clicked = false;
+        return;
+    }
+
+    rect(0, 0, 1280, 720, IM_COL32(0, 0, 0, 150));
+    rect(mx, my, mw, mh, p.bg2, 22);
+    tile(port, mx + 24, my + 20, 56, 1, false);
+    text(mx + 96, my + 24, 19, p.text, fit(19, port.title, mw - 120).c_str());
+    text(mx + 96, my + 50, 14, port.colours.accent,
+         fit(14, port.custom ? "Custom PC Game" : (std::string("SteelTemple ") + port.name), mw - 120).c_str());
+    for (int i = 0; i < n; ++i) {
+        float y = my + 94 + i * 52;
+        if (hover(mx + 22, y, mw - 44, 44)) {
+            if (a.mouse_moved && !a.clicked && g_quick_sel != i) { g_quick_sel = i; sound_play(SFX_MOVE); }
+            if (a.clicked) { run(items[i].id); return; }
+        }
+        rect(mx + 22, y, mw - 44, 44, p.panel, 12);
+        ImU32 ic = items[i].id == Q_REMOVE_CUSTOM ? p.warn : (items[i].id == Q_PLAY ? port.colours.accent : p.soft);
+        icon(items[i].icon, mx + 48, y + 22, 20, ic);
+        text(mx + 74, y + 12, 17, items[i].id == Q_REMOVE_CUSTOM ? p.warn : p.text, items[i].label.c_str());
+        if (i == g_quick_sel) focus_ring(mx + 22, y, mw - 44, 44, 12, 3);
+    }
+    a.nav = NAV_NONE;
+    a.clicked = false;
+}
+
 void home_frame() {
     App &a = app();
     const Palette &p = pal();
     auto &ps = ports();
     int n = (int)ps.size() + 1;   // the ports and "Get ports"
     if (a.game >= n) a.game = n - 1;
-    // the row's order, like the console's: the ports played last first, then the rest installed, then the ones not on
-    // this PC, then Get ports. a.game is a port (ps.size() for Get ports); pos is where it sits in the row.
+    // the row's order: pinned first, then installed (by cfg().home_sort: Last played, Most played, A-Z), then absent, then Get ports
     std::vector<int> order;
     for (int i = 0; i < (int)ps.size(); ++i) order.push_back(i);
+    int sort_mode = cfg().home_sort;
     std::stable_sort(order.begin(), order.end(), [&](int x, int y) {
+        bool px = cfg().pinned.count(ps[x].id) > 0, py = cfg().pinned.count(ps[y].id) > 0;
+        if (px != py) return px;
         bool hx = !ps[x].installs.empty(), hy = !ps[y].installs.empty();
         if (hx != hy) return hx;
+        if (sort_mode == 1) {
+            long long sx = played_seconds(x), sy = played_seconds(y);
+            if (sx != sy) return sx > sy;
+        } else if (sort_mode == 2) {
+            int c = SDL_strcasecmp(ps[x].title, ps[y].title);
+            if (c != 0) return c < 0;
+        }
         return last_played(x) > last_played(y);
     });
     order.push_back((int)ps.size());
@@ -116,7 +249,7 @@ void home_frame() {
         }
     };
 
-    if (!g_power) {
+    if (!g_power && !g_quick) {
         // ---- input
         switch (a.nav) {
         case NAV_LEFT:
@@ -164,7 +297,11 @@ void home_frame() {
             if (g_zone == Z_DOCK) open_dock(g_dock);
             break;
         case NAV_X:
-            if (g_zone == Z_ROW && a.game < (int)ps.size()) go(SCR_GAME);
+            if (g_zone == Z_ROW && a.game < (int)ps.size()) {
+                g_quick = true, g_quick_port = a.game, g_quick_sel = 0;
+                sound_play(SFX_OK);
+                a.nav = NAV_NONE, a.clicked = false;
+            }
             break;
         case NAV_PLUS:   // look again: this PC and GitHub
             sound_play(SFX_OK);
@@ -182,14 +319,17 @@ void home_frame() {
     // ---- layout
     float size = cfg().large_tiles ? 236 : 196, gap = 18;
     float row_y = cfg().large_tiles ? 170 : 190;
-    // keep the focused tile in view: the row scrolls once focus passes the fourth tile
     int visible = (int)((1280 - 96 - 60) / (size + gap));
     float want = std::max(0.0f, (float)(pos - (visible - 2))) * (size + gap);
     want = std::min(want, std::max(0.0f, n * (size + gap) - (1280 - 96 - 60)));
     g_scroll = ease(g_scroll, want, 14);
 
+    // dock geometry (8 clean round buttons, centered)
+    float dsz = 66, dgap = 22, dstep = dsz + dgap;
+    float dx0 = 640 - (kDockN * dsz + (kDockN - 1) * dgap) / 2.0f;
+
     // mouse: hover focuses, click opens
-    if (!g_power) {
+    if (!g_power && !g_quick) {
         for (int i = 0; i < prof_slots; ++i) {
             float cx = 67 + i * 58, cy = 46;
             if (hover(cx - 23, cy - 23, 46, 46)) {
@@ -214,9 +354,8 @@ void home_frame() {
                 }
             }
         }
-        float dx0 = 640 - (kDockN * 70 + (kDockN - 1) * 26) / 2.0f;
         for (int i = 0; i < kDockN; ++i)
-            if (hover(dx0 + i * 96, 488, 70, 70)) {
+            if (hover(dx0 + i * dstep, 490, dsz, dsz)) {
                 if (a.mouse_moved && !a.clicked && (g_zone != Z_DOCK || g_dock != i)) {
                     g_zone = Z_DOCK, g_dock = i;
                     sound_play(SFX_MOVE);
@@ -262,15 +401,19 @@ void home_frame() {
             title = fp->title;
             PortState st = fp->state();
             const Install *b = fp->best();
-            sub = std::string("SteelTemple ") + fp->name + "  ·  " +
-                  (st == PORT_ABSENT ? std::string("not installed  ·  ") + fp->latest_tag()
-                   : st == PORT_UPDATE ? b->version + "  ·  update " + fp->latest_tag() + " available"
-                   : b->version.empty() ? std::string("installed") : b->version);
-            if (fp->installs.size() > 1) sub += "  ·  " + std::to_string(fp->installs.size()) + " copies found";
+            if (fp->custom) {
+                sub = "Custom PC Game";
+            } else {
+                sub = std::string("SteelTemple ") + fp->name + "  ·  " +
+                      (st == PORT_ABSENT ? std::string("not installed  ·  ") + fp->latest_tag()
+                       : st == PORT_UPDATE ? b->version + "  ·  update " + fp->latest_tag() + " available"
+                       : b->version.empty() ? std::string("installed") : b->version);
+                if (fp->installs.size() > 1) sub += "  ·  " + std::to_string(fp->installs.size()) + " copies found";
+            }
             if (running_port() == a.game) sub += "  ·  playing now";
             else if (!played_text(a.game).empty()) sub += "  ·  " + played_text(a.game);
         } else {
-            title = "Get ports", sub = "Choose which ports to download";
+            title = "Get ports", sub = "Choose which ports to download or update";
         }
     } else if (g_zone == Z_DOCK) {
         title = kDock[g_dock].label;
@@ -289,16 +432,16 @@ void home_frame() {
     for (int i = 0; i < n; ++i) {
         int id = order[i];
         bool f = g_zone == Z_ROW && i == pos;
-        g_pop[i] = ease(g_pop[i], f ? 1.0f : 0.0f, 18);
-        float grow = 1 + 0.07f * g_pop[i];
+        int pop_i = i < 64 ? i : 63;
+        g_pop[pop_i] = ease(g_pop[pop_i], f ? 1.0f : 0.0f, 18);
+        float grow = 1 + 0.07f * g_pop[pop_i];
         float s = size * grow;
         float x = 96 + i * (size + gap) - g_scroll - (s - size) / 2, y = row_y - (s - size) / 2;
-        // the start: tiles rise in one after another
         float intro = std::min(1.0f, std::max(0.0f, (float)(a.now - 0.08 * i) * 3.2f));
         y += (1 - intro) * (1 - intro) * 40;
         if (id < (int)ps.size()) {
-            tile(ps[id], x, y, s, intro, true, g_pop[i]);
-            if (running_port() == id) {   // the game in play, as the console marks a suspended one
+            tile(ps[id], x, y, s, intro, true, g_pop[pop_i]);
+            if (running_port() == id) {
                 float w = text_w(s * 0.06f, "Playing") + s * 0.16f, h = s * 0.12f;
                 rect(x + s * 0.05f, y + s * 0.05f, w, h, with_alpha(p.ok, 235), h / 2);
                 icon(IC_PLAY, x + s * 0.05f + h * 0.55f, y + s * 0.05f + h / 2, h * 0.5f, IM_COL32_WHITE);
@@ -313,46 +456,49 @@ void home_frame() {
     }
     dl()->PopClipRect();
 
-    if (cfg().cover_dir.empty() && !demo_mode() && g_zone == Z_ROW && fp)
+    if (cfg().cover_dir.empty() && cfg().port_covers.empty() && !demo_mode() && g_zone == Z_ROW && fp)
         text(96, row_y + size + 30, 15, p.dim, "Your own cover art goes on these tiles: System Settings > Cover art.");
 
     // the round buttons
-    float dx0 = 640 - (kDockN * 70 + (kDockN - 1) * 26) / 2.0f;
+    int bn = builtin_port_count();
+    int absent = 0, updates = 0;
+    for (int k = 0; k < bn; ++k) {
+        if (ps[k].state() == PORT_ABSENT && !install_queued(k)) ++absent;
+        if (ps[k].state() == PORT_UPDATE && !install_queued(k)) ++updates;
+    }
     for (int i = 0; i < kDockN; ++i) {
-        float cx = dx0 + i * 96 + 35, cy = 523;
+        float cx = dx0 + i * dstep + dsz / 2, cy = 490 + dsz / 2;
         bool f = g_zone == Z_DOCK && i == g_dock;
-        circle(cx, cy + 3, 35, with_alpha(IM_COL32_BLACK, p.light ? 25 : 70));
-        circle(cx, cy, 35, p.panel);
-        icon(kDock[i].icon, cx, cy, 30, p.text);
-        if (i == 1) {   // Get ports: how many ports are not on this PC yet
-            int absent = 0;
-            for (int k = 0; k < (int)ps.size(); ++k) absent += ps[k].state() == PORT_ABSENT && !install_queued(k);
-            if (absent) {
-                circle(cx + 25, cy - 25, 11, p.accent);
-                text(cx + 25, cy - 34, 14, IM_COL32_WHITE, std::to_string(absent).c_str(), 0.5f);
-            }
+        circle(cx, cy + 3, dsz / 2, with_alpha(IM_COL32_BLACK, p.light ? 25 : 70));
+        circle(cx, cy, dsz / 2, p.panel);
+        icon(kDock[i].icon, cx, cy, 28, p.text);
+        if (i == 1 && (updates > 0 || absent > 0)) {   // Get ports: updates or available count
+            int badge = updates > 0 ? updates : absent;
+            circle(cx + 23, cy - 23, 11, updates > 0 ? p.ok : p.accent);
+            text(cx + 23, cy - 32, 13, IM_COL32_WHITE, std::to_string(badge).c_str(), 0.5f);
         }
         if (i == 2 && install_busy()) {   // Downloads: a ring fills with the running download
             float frac = -1;
             for (auto &j : install_jobs())
                 if (j.phase == PH_DOWNLOAD && j.total) frac = (float)j.done / j.total;
             if (frac < 0) frac = (float)std::fmod(a.now * 0.5, 1.0);
-            dl()->PathArcTo(P(cx, cy), S(31), -1.5708f, -1.5708f + 6.2832f * frac, 40);
+            dl()->PathArcTo(P(cx, cy), S(29), -1.5708f, -1.5708f + 6.2832f * frac, 40);
             dl()->PathStroke(p.accent, 0, S(4));
         }
         if (f) {
-            focus_ring(cx - 35, cy - 35, 70, 70, 35, 5);
-            text(cx, cy + 50, 16, p.text, kDock[i].label, 0.5f);
+            focus_ring(cx - dsz / 2, cy - dsz / 2, dsz, dsz, dsz / 2, 5);
+            text(cx, cy + 48, 16, p.text, kDock[i].label, 0.5f);
         }
     }
 
     // hints
     if (g_zone == Z_ROW && fp)
-        hint_bar({{NAV_A, fp->state() == PORT_ABSENT ? "Download" : "Start"}, {NAV_X, "Options"}, {NAV_PLUS, "Check for ports"}});
+        hint_bar({{NAV_A, fp->state() == PORT_ABSENT ? "Download" : "Open"}, {NAV_X, "Quick menu"}, {NAV_PLUS, "Refresh"}});
     else
-        hint_bar({{NAV_A, "OK"}, {NAV_PLUS, "Check for ports"}});
+        hint_bar({{NAV_A, "OK"}, {NAV_PLUS, "Refresh"}});
 
     if (g_power) power_frame();
+    if (g_quick) quick_frame();
 }
 
 }  // namespace sanctum

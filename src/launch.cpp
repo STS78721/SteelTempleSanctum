@@ -9,6 +9,7 @@
 
 #include "app.h"
 #include "config.h"
+#include "discord_rpc.h"
 #include "sound.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -108,6 +109,52 @@ static std::map<int, LastRun> g_last;
 static std::mutex g_lock;
 static std::vector<std::pair<int, LastRun>> g_judged;
 
+static std::vector<std::string> split_args(const std::string &s) {
+    std::vector<std::string> out;
+    std::string cur;
+    bool in_q = false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        if (c == '"') { in_q = !in_q; continue; }
+        if (!in_q && (c == ' ' || c == '\t')) {
+            if (!cur.empty()) out.push_back(cur), cur.clear();
+            continue;
+        }
+        cur += c;
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+static void apply_custom_env(SDL_Environment *env, const std::string &spec) {
+    if (spec.empty()) return;
+    size_t at = 0;
+    while (at < spec.size()) {
+        size_t end = spec.find_first_of(";\n", at);
+        if (end == std::string::npos) end = spec.size();
+        std::string tok = spec.substr(at, end - at);
+        at = end + 1;
+        size_t a = tok.find_first_not_of(" \t\r"), b = tok.find_last_not_of(" \t\r");
+        if (a == std::string::npos) continue;
+        tok = tok.substr(a, b - a + 1);
+        size_t eq = tok.find('=');
+        if (eq == std::string::npos || eq == 0) continue;
+        std::string k = tok.substr(0, eq), v = tok.substr(eq + 1);
+        SDL_SetEnvironmentVariable(env, k.c_str(), v.c_str(), true);
+    }
+}
+
+std::string port_save_dir(const Port &p, const Install &in) {
+    if (!strcmp(p.id, "mastersword")) {
+        if (exists(in.dir + "\\user\\save")) return in.dir + "\\user\\save";
+        if (exists(in.dir + "\\user")) return in.dir + "\\user";
+        return {};
+    }
+    for (const char *rel : {"profile", "saves", "save", "user\\save"})
+        if (exists(in.dir + "\\" + rel)) return in.dir + "\\" + rel;
+    return {};
+}
+
 bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     if (g_proc) { sound_play(SFX_ERROR); toast("A game is already running"); return false; }
     if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: games don't start"); return false; }
@@ -120,6 +167,11 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     std::vector<std::string> argv{exe};
     if (play && pr)
         for (const char *a : pr->args) argv.push_back(expand(a, in));
+    if (play) {
+        auto it = cfg().launch_args.find(p.id);
+        if (it != cfg().launch_args.end() && !it->second.empty())
+            for (auto &extra : split_args(it->second)) argv.push_back(std::move(extra));
+    }
     std::vector<const char *> args;
     for (auto &a : argv) args.push_back(a.c_str());
     args.push_back(nullptr);
@@ -137,6 +189,10 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
         }
         if (pr->profile_env && !cfg().profile.empty())
             SDL_SetEnvironmentVariable(env, pr->profile_env, cfg().profile.c_str(), false);
+    }
+    if (play) {
+        auto it = cfg().launch_env.find(p.id);
+        if (it != cfg().launch_env.end() && !it->second.empty()) apply_custom_env(env, it->second);
     }
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args.data());
@@ -164,6 +220,7 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     if (g_pid) AllowSetForegroundWindow(g_pid);
     g_starting = true;
     sound_play(SFX_LAUNCH);
+    discord_rpc_set_activity(std::string("Playing ") + p.title, p.custom ? "via SteelTemple Sanctum" : (std::string("SteelTemple ") + p.name));
     (void)w;
     return true;
 }
@@ -220,9 +277,20 @@ void close_game() {
     if (g_proc) SDL_KillProcess(g_proc, false);   // a polite close first (WM_CLOSE / Ctrl-Break)
 }
 
-// ---- play time
-static std::map<std::string, std::pair<long long, long long>> g_time;   // id -> (seconds, last played)
+// ---- play time (per profile: "p<idx>:<port_id>=<seconds>|<last_played>|<sessions>")
+struct PlayStat {
+    long long seconds = 0;
+    long long last = 0;
+    int sessions = 0;
+};
+static std::map<std::string, PlayStat> g_time;
 static std::string playtime_path() { return config_dir() + "playtime.ini"; }
+
+static std::string play_key(int port, int profile_idx = -1) {
+    int pi = profile_idx < 0 ? cfg().active_profile : profile_idx;
+    if (pi < 0) pi = 0;
+    return "p" + std::to_string(pi) + ":" + std::string(ports()[port].id);
+}
 
 void playtime_load() {
     size_t n = 0;
@@ -236,28 +304,71 @@ void playtime_load() {
         if (end == std::string::npos) end = all.size();
         std::string l = all.substr(at, end - at);
         at = end + 1;
-        size_t a = l.find('='), b = l.find('|');
-        if (a == std::string::npos || b == std::string::npos) continue;
-        g_time[l.substr(0, a)] = {atoll(l.substr(a + 1, b - a - 1).c_str()), atoll(l.substr(b + 1).c_str())};
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        if (l.empty() || l[0] == '#') continue;
+        size_t eq = l.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = l.substr(0, eq), rest = l.substr(eq + 1);
+        // Backwards compatibility: legacy "<port_id>=<secs>|<last>" maps to Profile 0 ("p0:<port_id>")
+        if (k.find(':') == std::string::npos) k = "p0:" + k;
+        size_t b1 = rest.find('|');
+        if (b1 == std::string::npos) continue;
+        size_t b2 = rest.find('|', b1 + 1);
+        PlayStat st;
+        st.seconds = atoll(rest.substr(0, b1).c_str());
+        st.last = atoll((b2 == std::string::npos ? rest.substr(b1 + 1) : rest.substr(b1 + 1, b2 - b1 - 1)).c_str());
+        st.sessions = b2 == std::string::npos ? (st.last > 0 ? 1 : 0) : atoi(rest.substr(b2 + 1).c_str());
+        if (st.last > 0 && st.sessions <= 0) st.sessions = 1;
+        // If both legacy and p0: exist, keep the richer record
+        auto &dst = g_time[k];
+        if (st.seconds >= dst.seconds) dst = st;
     }
 }
 
 static void playtime_add(int port, long long secs) {
-    auto &t = g_time[ports()[port].id];
-    t.first += secs, t.second = (long long)time(nullptr);
-    std::string s = "# SteelTemple Sanctum: time played from Sanctum, per port (seconds|last played)\n";
-    for (auto &e : g_time) s += e.first + "=" + std::to_string(e.second.first) + "|" + std::to_string(e.second.second) + "\n";
+    auto &t = g_time[play_key(port)];
+    t.seconds += secs;
+    t.last = (long long)time(nullptr);
+    t.sessions += 1;
+    std::string s = "# SteelTemple Sanctum: time played per profile and port (p<profile>:<id>=seconds|last|sessions)\n";
+    for (auto &e : g_time)
+        s += e.first + "=" + std::to_string(e.second.seconds) + "|" + std::to_string(e.second.last) + "|" +
+             std::to_string(e.second.sessions) + "\n";
     std::string tmp = playtime_path() + ".tmp";
     if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), playtime_path().c_str());
 }
 
 long long played_seconds(int port) {
-    auto it = g_time.find(ports()[port].id);
-    return it == g_time.end() ? 0 : it->second.first;
+    if (port < 0 || port >= (int)ports().size()) return 0;
+    auto it = g_time.find(play_key(port));
+    return it == g_time.end() ? 0 : it->second.seconds;
 }
 long long last_played(int port) {
-    auto it = g_time.find(ports()[port].id);
-    return it == g_time.end() ? 0 : it->second.second;
+    if (port < 0 || port >= (int)ports().size()) return 0;
+    auto it = g_time.find(play_key(port));
+    return it == g_time.end() ? 0 : it->second.last;
+}
+int played_sessions(int port) {
+    if (port < 0 || port >= (int)ports().size()) return 0;
+    auto it = g_time.find(play_key(port));
+    return it == g_time.end() ? 0 : it->second.sessions;
+}
+
+std::string played_duration_short(int port) {
+    long long s = played_seconds(port), when = last_played(port);
+    if (!when && s <= 0) return "Not played yet";
+    if (s < 60) return "< 1 min";
+    if (s < 3600) return std::to_string(s / 60) + " min";
+    return std::to_string(s / 3600) + " h " + std::to_string((s % 3600) / 60) + " min";
+}
+
+std::string last_played_short(int port) {
+    long long when = last_played(port);
+    if (!when) return "Never";
+    long long days = ((long long)time(nullptr) - when) / 86400;
+    if (days <= 0) return "Today";
+    if (days == 1) return "Yesterday";
+    return std::to_string(days) + " days ago";
 }
 
 std::string played_text(int port) {
@@ -395,6 +506,7 @@ void launch_poll(SDL_Window *w) {
     // back in front: restored (still fullscreen if it was), and given the foreground the game just let go of
     SDL_RestoreWindow(w);
     sound_set_paused(false);
+    discord_rpc_set_activity("Browsing library", "SteelTemple Sanctum");
     bring_to_front(hwnd_of(w), !was_starting);
     SDL_RaiseWindow(w);
     // back on the game's page, its last run being judged

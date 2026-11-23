@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <vector>
 
@@ -10,7 +11,10 @@
 #include "catalog.h"
 #include "config.h"
 #include "draw.h"
+#include "github.h"
+#include "install.h"
 #include "launch.h"
+#include "platform.h"
 #include "sound.h"
 
 namespace sanctum {
@@ -177,6 +181,86 @@ static void toggle_mod(int port_id, int idx) {
     reload_mods(port_id);
 }
 
+int mods_active_port() { return g_loaded_port; }
+
+bool mods_install_zip(int port_id, const std::string &zip_path) {
+    if (port_id < 0 || port_id >= (int)ports().size() || zip_path.empty()) return false;
+    if (running_port() == port_id) {
+        sound_play(SFX_ERROR);
+        toast("Close the game before installing a mod");
+        return false;
+    }
+    if (demo_mode()) {
+        sound_play(SFX_ERROR);
+        toast("Demo mode: mods are not installed");
+        return false;
+    }
+    const Port &port = ports()[port_id];
+    const Install *in = port.best();
+    if (!in) {
+        sound_play(SFX_ERROR);
+        toast(std::string(port.name) + " is not installed on this PC");
+        return false;
+    }
+    std::string stage = local_dir() + "mod-stage";
+    remove_tree(stage);
+    SDL_CreateDirectory(stage.c_str());
+    std::atomic<bool> cancel{false};
+    std::string err = unzip(zip_path, stage, cancel);
+    if (!err.empty()) {
+        remove_tree(stage);
+        sound_play(SFX_ERROR);
+        toast("Could not unpack mod zip: " + err, 4);
+        return false;
+    }
+    // Check if the zip already has a single top-level folder so we don't double-nest it
+    int cnt = 0;
+    char **entries = SDL_GlobDirectory((stage + "\\").c_str(), "*", 0, &cnt);
+    std::vector<std::string> dirs, files;
+    for (int i = 0; entries && i < cnt; ++i) {
+        std::string nm = entries[i];
+        if (nm.empty() || nm[0] == '.') continue;
+        SDL_PathInfo pi{};
+        if (SDL_GetPathInfo((stage + "\\" + nm).c_str(), &pi)) {
+            if (pi.type == SDL_PATHTYPE_DIRECTORY) dirs.push_back(nm);
+            else files.push_back(nm);
+        }
+    }
+    SDL_free(entries);
+
+    std::string src = stage;
+    std::string mod_name;
+    if (dirs.size() == 1 && files.empty()) {
+        src = stage + "\\" + dirs[0];
+        mod_name = dirs[0];
+    } else {
+        size_t sl = zip_path.find_last_of("\\/");
+        std::string base = sl == std::string::npos ? zip_path : zip_path.substr(sl + 1);
+        size_t dot = base.rfind('.');
+        mod_name = dot == std::string::npos ? base : base.substr(0, dot);
+        if (mod_name.empty()) mod_name = "Mod";
+    }
+
+    std::string mods_dir = in->dir + "\\mods";
+    SDL_CreateDirectory(mods_dir.c_str());
+    std::string dst = mods_dir + "\\" + mod_name;
+    int n = 2;
+    while (SDL_GetPathInfo(dst.c_str(), nullptr)) dst = mods_dir + "\\" + mod_name + " (" + std::to_string(n++) + ")";
+
+    std::string oerr = overlay(src, dst);
+    remove_tree(stage);
+    if (!oerr.empty()) {
+        sound_play(SFX_ERROR);
+        toast("Could not install mod: " + oerr, 4);
+        return false;
+    }
+    mods_invalidate_cache();
+    if (g_loaded_port == port_id) reload_mods(port_id);
+    sound_play(SFX_TOGGLE_ON);
+    toast("Installed mod \"" + mod_name + "\" for " + std::string(port.name), 3.5);
+    return true;
+}
+
 static void open_mods_folder(int port_id) {
     if (demo_mode()) {
         sound_play(SFX_ERROR);
@@ -248,7 +332,12 @@ void mods_frame() {
     case NAV_X:
         open_mods_folder(pid);
         break;
-    case NAV_Y:
+    case NAV_Y: {
+        std::string z = pick_open_file(a.window, "Install mod archive (.zip)", "ZIP archives", "*.zip");
+        if (!z.empty()) mods_install_zip(pid, z);
+        break;
+    }
+    case NAV_PLUS:
         mods_invalidate_cache();
         reload_mods(pid);
         sound_play(SFX_OK);
@@ -304,10 +393,10 @@ void mods_frame() {
     }
 
     if (n == 0) {
-        rect(x, 146, w, 112, p.panel, 14);
-        icon(IC_MODS, x + 42, 202, 28, cur.colours.accent);
+        rect(x, 146, w, 122, p.panel, 14);
+        icon(IC_MODS, x + 42, 207, 28, cur.colours.accent);
         text(x + 76, 174, 18, p.text, "No mods in this port's mods folder yet");
-        text(x + 76, 206, 15, p.soft, "Press X to open the mods folder and drop mod folders inside.");
+        text(x + 76, 206, 15, p.soft, "Press Y to install a .zip mod, drop a .zip onto Sanctum, or press X to open the mods folder.");
     } else {
         for (int i = g_top; i < n && i < g_top + kVisible; ++i) {
             const ModEntry &m = g_mods[i];
@@ -333,8 +422,8 @@ void mods_frame() {
     }
     if (running_port() == pid) text(x, 614, 14, p.warn, "The game is running: close it to enable or disable mods.");
 
-    if (g_in_rows) hint_bar({{NAV_A, "Toggle"}, {NAV_X, "Open folder"}, {NAV_Y, "Refresh"}, {NAV_B, "Back"}});
-    else hint_bar({{NAV_A, n ? "Open" : "Open folder"}, {NAV_X, "Open folder"}, {NAV_Y, "Refresh"}, {NAV_B, "Back"}});
+    if (g_in_rows) hint_bar({{NAV_A, "Toggle"}, {NAV_Y, "Install .zip"}, {NAV_X, "Open folder"}, {NAV_B, "Back"}});
+    else hint_bar({{NAV_A, n ? "Open" : "Open folder"}, {NAV_Y, "Install .zip"}, {NAV_X, "Open folder"}, {NAV_B, "Back"}});
 }
 
 }  // namespace sanctum

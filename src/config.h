@@ -2,6 +2,7 @@
 // Never next to the program and never in a release: a package carries defaults only.
 #pragma once
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -17,25 +18,42 @@ struct Config {
     int theme = 0;                // THEME_DARK / THEME_LIGHT
     bool follow = true;           // the focused port tints Home
     bool large_tiles = true;
+    int home_sort = 0;            // 0 last played, 1 most played, 2 A-Z
+    std::set<std::string> pinned; // port ids pinned to the front of Home
     bool sounds = true;
     int sound_volume = 1;         // 0 low, 1 medium, 2 high
+    int sound_theme = 0;          // 0 Switch 2 Crisp, 1 Warm Retro, 2 Soft Minimal
+    int ambient_bgm = 0;          // 0 Off, 1 Soft console hum, 2 Custom WAV
+    std::string bgm_path;         // custom .wav path when ambient_bgm == 2
     bool rumble = true;           // subtle controller vibration on focus & confirm
     int rumble_strength = 1;      // 0 low, 1 medium, 2 high
+    int stick_deadzone = 1;       // 0 low (0.35), 1 default (0.55), 2 high (0.72)
+    bool force_close_chord = true;// hold Back+Start+L+R for 2 s while a game runs to close it
     bool hide_dev = false;        // leave out copies inside build / staging / backup folders (they rank last anyway)
     std::map<std::string, std::string> prefer;   // port id -> the copy the player chose ("Use this copy")
     bool fullscreen = true;       // starts fullscreen, like a console
     bool hide_cursor = true;      // the pointer hides while a pad is in use
+    bool clock_12h = false;       // status bar clock: false = 24-hour, true = 12-hour AM/PM
+    std::string display_name;     // empty = primary display; else SDL display name to open on
+    int idle_dim_min = 0;         // OLED idle dim timeout: 0 off, 5 min, 15 min
     // like the ports' F1 menus: which face button confirms, and which buttons the hints show
     int pad_layout = 0;           // 0 automatic (the label printed on the button), 1 Nintendo (A right), 2 Xbox (A bottom)
     int button_icons = 0;         // 0 automatic (the pad's own), 1 Nintendo, 2 Xbox, 3 PlayStation
     std::string cover_dir;        // the player's own folder of cover art; empty until they pick one
+    std::string screenshots_dir;  // optional extra folder for Album screenshots
     std::string library_dir;      // where Get ports installs; empty: <home>\Games\SteelTemple
     std::string profile = "Player 1";
     bool auto_update = true;      // Sanctum downloads its own updates and puts them in place when it closes
-    std::string avatar = "Sword";  // the profile icon, by its name in assets/avatars.txt
-    int avatar_bg = 0;             // its background colour (avatars.cpp, kColours)
+    bool discord_rpc = false;     // opt-in Discord Rich Presence (off by default for privacy)
+    std::string discord_app_id;   // optional Discord application ID override
+    std::string last_seen_version;// last version whose What's New card was seen (empty on first install)
+    std::string avatar = "Sword"; // the profile icon, by its name in assets/avatars.txt
+    int avatar_bg = 0;            // its background colour (avatars.cpp, kColours)
     std::vector<PlayerProfile> profiles = {{"Player 1", "Sword", 0}};
     int active_profile = 0;
+    std::map<std::string, std::string> port_covers; // port id -> custom single cover image path
+    std::map<std::string, std::string> launch_args; // port id -> custom extra command-line args
+    std::map<std::string, std::string> launch_env;  // port id -> custom KEY=VAL;KEY2=VAL2 overrides
 };
 
 Config &cfg();

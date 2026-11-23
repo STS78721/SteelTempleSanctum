@@ -18,8 +18,8 @@ enum Nav { NAV_NONE, NAV_LEFT, NAV_RIGHT, NAV_UP, NAV_DOWN, NAV_A, NAV_B, NAV_X,
 // What the connected pad's face buttons look like, for the button hints.
 enum PadStyle { PAD_KEYBOARD, PAD_XBOX, PAD_NINTENDO, PAD_PLAYSTATION, PAD_GENERIC };
 
-enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE, SCR_MODS };
-enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY, FOLDER_ADD_PORT };
+enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE, SCR_MODS, SCR_ALBUM };
+enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY, FOLDER_ADD_PORT, FOLDER_SCREENSHOTS };
 
 struct Toast {
     std::string text;
@@ -64,6 +64,7 @@ void go(Screen s, bool silent = false);               // open a screen (remember
 void go_back(bool silent = false);
 void toast(const std::string &text, double seconds = 2.6);
 void set_fullscreen(bool on);    // applies and remembers it (Settings > Display, F11, Alt+Enter)
+void apply_display(const std::string &display_name); // moves window to the chosen monitor/TV (empty = primary)
 // a line in the file SANCTUM_LOG names (debugging; nothing is written without it). Safe from any thread.
 void sanctum_log(const char *fmt, ...);
 // SANCTUM_DEMO=1: screenshots for the README. No folders of this PC on screen, no cover art, nothing saved,
@@ -92,11 +93,17 @@ void profile_open();          // the player's profile: icon, colour, name, play 
 void profile_frame();
 void mods_open(int port = -1);// per-port mod manager (mods.cpp)
 void mods_frame();
+void album_init(struct SDL_Renderer *r);
+void album_open();            // Switch-style screenshots Album (album.cpp)
+void album_frame();
+void album_poll();
 
 // the controller folder picker; X sets the cover-art folder or the folder new ports install into
 void folder_open(const std::string &start, FolderFor what = FOLDER_COVERS);
 void game_show_release(int port, const std::string &tag);   // a port's page, on its release notes
 void game_show_overview(int port);                          // a port's page, at the top (back from playing)
+void game_open_tab(int port, int tab);                      // open a port's page directly on a specific tab
 void get_ports_select(int port);                             // Get ports with this port ticked
+int ports_update_all();                                     // queue updates for every installed port with an update; returns count
 
 }  // namespace sanctum

@@ -26,10 +26,12 @@ keep them up to date, change their settings, and start any game straight from th
 
 ### 🏠 A home screen that feels like a console
 
-Your ports sit in one row, ordered by what you played last, each in its own colours. The round buttons below
-open Releases & news, Get ports, Downloads, Mods, Controllers, System Settings and Power. Sanctum opens fullscreen
-with smooth screen transitions and hides the mouse pointer while you use a controller. Dark and Light themes are
-included, and Home can take on the colours of the port you select.
+Your ports sit in one row — sorted by **Last played**, **Most played**, or **A to Z**, with **Pin to front** and a
+**Quick menu (`X`)** for one-press actions — each in its own colours. The round buttons below open **Releases & news**,
+**Get ports** (with an available-updates badge), **Downloads**, **Album**, **Mods**, **Controllers**, **System
+Settings** and **Power**. Sanctum opens fullscreen on your chosen monitor or TV with smooth transitions, hides the mouse
+pointer while you use a controller, and shows live **handheld/laptop and wireless controller battery indicators** in the
+status bar. Dark and Light themes, **12h/24h clock**, and **OLED Idle Dim** protection are built in.
 
 <div align="center">
 <img src="docs/screenshots/home-light.png" width="800" alt="Home in the Light theme">
@@ -39,25 +41,29 @@ included, and Home can take on the colours of the port you select.
 
 **Play** starts the game itself and skips the port's own launcher. Sanctum steps aside while you play and comes back
 when you quit, on the game's page with a note on how the run went. If something went wrong, the log and the issue
-report are one button away. Sanctum also counts how long you've played each port.
+report are one button away — and if a game ever freezes, hold **Back + Start + L + R** for 2 seconds to force-close it
+safely from the couch. Each port page shows a **TIME PLAYED** card tracked per profile, and you can also add **custom PC
+games** or set per-game **custom launch arguments and environment overrides**.
 
 <div align="center">
-<img src="docs/screenshots/game.png" width="800" alt="A port's page: Play, version, the copy that will start">
+<img src="docs/screenshots/game.png" width="800" alt="A port's page: Play, version, TIME PLAYED card, and the copy that will start">
 </div>
 
 ### 🔎 Finds the ports you already have
 
 At start, Sanctum looks through the Setup Wizards' entries and every drive for ports already on this PC, so nothing
-is installed twice. It reads each copy's real version directly from its game program. If you keep a port in an
-unusual location, you can add its folder manually in **System Settings > Ports on this PC**. If you have more than
-one copy, you pick which one Play starts.
+is installed twice. It reads each copy's real version from its game program, companion renderer DLLs, and `VERSION`
+files (picking the newest component so neither stale `VERSION` files nor launcher/renderer hotfixes misreport updates).
+If you keep a port in an unusual location — or want to launch any other PC `.exe` — add it in **System Settings > Ports
+on this PC**. If you have more than one copy, you pick which one Play starts.
 
 ### ⬇️ Get ports, update them, read what's new
 
-**Get ports** lists every released port: tick the ones you want and press Download. Downloads run in the background
-while you keep browsing. Each one is checked against the SHA-256 that GitHub publishes, and an update keeps a way
-back if it fails. Every port's release notes can be read on its own page — and you can install or roll back to any
-older release straight from the release notes pane — while **Releases & news** puts all of them in one list.
+**Get ports** lists every released port: tick the ones you want and press Download, or use **Update all** to queue every
+available port update in one click. Downloads run in the background while you keep browsing. Each one is checked against
+the SHA-256 that GitHub publishes, and an update keeps a way back if it fails. Every port's release notes can be read on
+its own page — and you can install or roll back to any older release straight from the release notes pane — while
+**Releases & news** puts all of them in one list.
 
 <table>
 <tr>
@@ -72,9 +78,9 @@ older release straight from the release notes pane — while **Releases & news**
 ### ⚙️ Each game's own settings, from the couch
 
 A port's **Settings** tab shows the same pages, options and values as the game's own in-game menu, in the port's
-colours (including MKW-THWOMP, TotK SteelTempleBuild, SlowSeparation, ShadowRacket, dkb-BANANAS, and WonderBloom).
-Changes go straight into the game's settings file, and its comments and layout stay as they are. **Y** puts any
-option back to the game's default.
+colours — across **all 7 ports** (MKW-THWOMP, MasterSword, TotK SteelTempleBuild, SlowSeparation, ShadowRacket,
+dkb-BANANAS, and WonderBloom). Changes go straight into the game's settings file, keeping its comments and layout
+intact. **Y** puts any option back to the game's default.
 
 <table>
 <tr>
@@ -83,49 +89,57 @@ option back to the game's default.
 </tr>
 </table>
 
-### 🧩 Mods & storage management
+### 💾 Storage overview, save backups & mod manager
 
-Open **Mods** from the Home dock or a port's **Mods** tab to see installed mod folders and toggle them on or off
-safely without deleting files. Each port's **Files & storage** tab shows its disk footprint and gives one-click
-access to its install folder, logs, required-file verification, settings backup/restore, and safe uninstall to the
-Windows Recycle Bin.
+- **System Settings > Storage** shows every mounted drive's **total capacity, free space, used space, and SteelTemple
+  library footprint**, plus one-click download cache cleanup and direct jumps into each title's storage page.
+- Each port's **Files & storage** tab lets you create timestamped **ZIP save-file backups** (pure C++, zero external
+  tools) and safely restore them with a 2-press guard and automatic pre-restore snapshot, verify required files, open
+  logs, or uninstall to the Windows Recycle Bin.
+- Open **Mods** from the Home dock or a port's **Mods** tab — or drag and drop any `.zip` mod straight onto Sanctum — to
+  install and toggle mod folders safely without deleting files.
 
 <table>
 <tr>
+<td colspan="2"><img src="docs/screenshots/storage.png" alt="System Settings, Storage: drive capacities, free space, and per-title library sizes"></td>
+</tr>
+<tr>
 <td><img src="docs/screenshots/mods.png" alt="Mods manager: toggle mod folders per port"></td>
-<td><img src="docs/screenshots/files.png" alt="Files and storage tab: disk size, verify, backup, and safe uninstall"></td>
+<td><img src="docs/screenshots/files.png" alt="Files and storage tab: disk size, verify, save backup, and safe uninstall"></td>
 </tr>
 </table>
 
 ### 🕹️ Any controller, your button layout
 
 Xbox, PlayStation, Switch Pro, Joy-Con and generic pads all work, and the on-screen hints show your pad's own
-buttons. Like the ports' F1 menus, **System Settings > Controllers** lets you choose the **Button layout**
-(Automatic, Nintendo with A on the right, or Xbox with A at the bottom), the **Button icons**, and **Controller
-vibration** with configurable **Vibration strength** (**Low**, **Medium**, or **High**). Keyboard and mouse work
-everywhere too.
+buttons. **System Settings > Controllers** lets you choose the **Button layout** (Automatic, Nintendo with A on the
+right, or Xbox with A at the bottom), **Button icons**, **Controller vibration** and strength (**Low**, **Medium**,
+**High**), **Menu stick deadzone**, the **Force-close chord**, and a live dual-stick, analog trigger, button & battery
+**Controller Tester**. Keyboard and mouse work everywhere too.
 
 <div align="center">
-<img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: Button layout, Button icons, and Controller vibration">
+<img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: layout, icons, vibration, deadzone, force-close chord, and tester">
 </div>
 
-### 🔊 Console menu sounds
+### 🔊 Console menu sounds & ambient audio
 
-Clean, tactile Switch 2–style UI sounds play as you move focus, hit edges, confirm, go back, flip tabs, toggle
-settings, type on the on-screen keyboard, return Home, or start a game, and pause automatically while a game is
-running. **System Settings > Sound** lets you turn **Menu sounds** off at any time and choose a **Volume** (**Low**,
-**Medium** or **High**).
+Clean, tactile Switch 2–style UI sounds play as you navigate, toggle settings, type on the on-screen keyboard, or start
+a game, and pause automatically while a game runs. **System Settings > Sound** offers 3 built-in **Sound profiles**
+(**Switch 2 Crisp**, **Warm Retro**, **Soft Minimal**), **Volume** control, and optional **Home ambient audio** (a soft
+console hum or your own custom `.wav` track).
 
 <div align="center">
-<img src="docs/screenshots/sound.png" width="800" alt="System Settings, Sound: Menu sounds toggle and Volume">
+<img src="docs/screenshots/sound.png" width="800" alt="System Settings, Sound: sound profiles, volume, and Home ambient audio">
 </div>
 
-### 👤 Profiles & play activity
+### 👤 Profiles, Album & your cover art
 
-Create up to four local profiles, each with its own name, background colour, and icon from 60 original designs in
-six sets (SteelTemple, Creatures, Food, Nature, Space and Play). Switch profiles right from the top-left of Home,
-name them with the on-screen keyboard or your PC keyboard, and check per-game play time in the **Play activity**
-tab. The active profile name is also forwarded to supported ports automatically.
+- **Profiles:** Create up to four local profiles, each with its own name, background colour, per-profile play time, and
+  icon from 60 original designs in six sets (SteelTemple, Creatures, Food, Nature, Space and Play).
+- **Album:** Browse screenshots from your ports and Windows Screenshots folder in a Switch-style grid with a full-screen
+  lightbox and safe Recycle Bin delete.
+- **Cover art:** Sanctum ships no game art. Point **System Settings > Cover art** at your own folder, pick a custom
+  cover per title, or drag and drop an image straight onto a game tile.
 
 <table>
 <tr>
@@ -134,11 +148,15 @@ tab. The active profile name is also forwarded to supported ports automatically.
 </tr>
 </table>
 
-### 🖼️ Your cover art, on your tiles
+### 🛠️ System diagnostics & optional Discord Rich Presence
 
-Sanctum ships no game art. Point **System Settings > Cover art** at your own folder of images (including subfolders),
-and each one is matched to its port by name (for example `Mario Kart World.png`). The tiles update by themselves when
-you add or change a picture. A port without a cover shows its colours and short name, as in the screenshots here.
+**System Settings > About** displays a quick hardware/OS diagnostics summary with one-click **Copy support info** for
+bug reports, manages automatic background self-updates (with a one-time **"What's New"** card after each update), and
+includes optional, off-by-default **Discord Rich Presence**.
+
+<div align="center">
+<img src="docs/screenshots/about.png" width="800" alt="System Settings, About Sanctum: version, updates, Discord RPC, shortcuts, and diagnostics">
+</div>
 
 ---
 

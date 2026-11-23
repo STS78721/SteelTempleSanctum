@@ -36,8 +36,12 @@ void hint_bar(std::initializer_list<std::pair<Nav, const char *>> hints);
 void status_bar(bool show_profile = true);
 
 enum Icon { IC_NEWS, IC_DOWNLOAD, IC_MODS, IC_PROFILE, IC_PAD, IC_GEAR, IC_POWER, IC_FOLDER, IC_PALETTE, IC_LIBRARY,
-            IC_INFO, IC_PLAY, IC_SEARCH, IC_DRIVE, IC_UP, IC_CHECK, IC_DISPLAY, IC_SOUND, IC_PAUSE, IC_CLOSE, IC_STORE };
+            IC_INFO, IC_PLAY, IC_SEARCH, IC_DRIVE, IC_UP, IC_CHECK, IC_DISPLAY, IC_SOUND, IC_PAUSE, IC_CLOSE, IC_STORE,
+            IC_ALBUM, IC_PIN, IC_STORAGE, IC_COPY };
 void icon(Icon i, float cx, float cy, float size, ImU32 col);
+
+// Handheld / laptop system battery (returns true on Legion Go / ROG Ally / laptops with a battery, false on desktops)
+bool system_battery_info(int *pct_out, bool *charging_out);
 
 // a port's tile: its cover, else its colours and monogram; badges for its state
 void tile(const Port &p, float x, float y, float size, float alpha = 1, bool badges = true, float lit = 1);

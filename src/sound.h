@@ -1,5 +1,6 @@
-// Procedural Switch 2-style UI sounds, synthesized at start-up with SDL3 audio (zero external assets).
+// Procedural Switch 2-style UI sounds & optional Home ambient audio, synthesized with SDL3 audio (zero external assets).
 #pragma once
+#include <string>
 
 namespace sanctum {
 
@@ -22,8 +23,10 @@ enum Sfx {
 void sound_init();                  // non-fatal if no audio device exists; pre-synthesizes all buffers
 void sound_shutdown();              // closes stream/device and shuts down SDL_INIT_AUDIO
 void sound_play(Sfx s);             // no-op if disabled, paused, or not initialized
-void sound_set_enabled(bool on);    // pauses device & clears active voices when false; resumes when true (unless externally paused)
+void sound_set_enabled(bool on);    // toggles UI SFX
 void sound_set_volume(int level);   // 0 = Low (0.35), 1 = Medium (0.65), 2 = High (1.0)
+void sound_set_theme(int theme);    // 0 = Switch 2 Crisp, 1 = Warm Retro, 2 = Soft Minimal
+void sound_set_ambient(int mode, const std::string &wav_path = {}); // 0 = Off, 1 = Built-in hum, 2 = Custom WAV
 void sound_set_paused(bool paused); // pauses audio device while a launched game is running, resumes on return
 
 }  // namespace sanctum

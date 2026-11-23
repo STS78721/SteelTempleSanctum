@@ -70,10 +70,10 @@ last first, like the console.
 
 A port's page has a **Settings** tab: its own in-game settings, the same pages, rows, words and values as the game's
 menu, in the port's colours. A or left/right changes a value, Y puts it back to the game's default, L/R change page.
-Sanctum writes the port's own ini beside its game (`mkw.ini`, `totk.ini`, `ff.ini`, `mtf.ini`, `dkb.ini`) the way the
-game does: only the changed line, keeping comments, order and line endings, a new key under its section; the first
+Sanctum writes the port's own ini beside its game (`mkw.ini`, `mastersword_options.ini`, `totk.ini`, `ff.ini`, `mtf.ini`, `dkb.ini`, `smbw.ini`) the way the
+game does: only the changed line, keeping comments, order and line endings, a new key under its section (or flat for `mastersword_options.ini`); the first
 change of a visit saves `<ini>.sanctum-bak`. A setting the environment fixes is shown greyed; while the game runs the
-page is read-only. MasterSword's settings stay in its own launcher (its menu is built differently).
+page is read-only.
 
 The lists are `assets/settings/<port>.json`, read from each port's source by `tools/extract_settings.py`
 (`cfg.c` `metas[]` and `sections[]`, the menu's `tab_*()` rows, the English text); each names the commit it came
@@ -89,10 +89,10 @@ python tools/extract_settings.py totk       # one
 At start the list from the last search shows at once; a new search runs in the background: the Setup Wizards'
 entries in Windows' apps list, then every fixed drive, six folders deep, for each port's program (`mkw.exe` with
 `mkwgame.id`, `mastersword.exe`, `totk.exe`, `ff.exe`, `mtf.exe`, `dkb.exe`, `smbw.exe`, or the port's own launcher alone), plus Sanctum's
-own install folder. A copy found before and still there is never dropped. Each copy's version is read from its
-game program, which carries its release tag (`0.2.2c`, `Alpha 0.1.3b`, `Beta 6.3`): truer than a Setup Wizard's
-registry entry or a VERSION file, which go stale when a copy is updated another way. Read once per program on a
-worker, the copies in use first, and kept in `versions.ini`. Every copy is kept; the best (Setup
+own install folder. A copy found before and still there is never dropped. Each copy's version combines its game
+program, companion renderer DLL (`*_vk.dll` / `hookshot_vk.dll`), and `VERSION` / `*_version.txt` files (picking the
+newest component version so neither stale `VERSION` files nor launcher/renderer-only hotfix updates misreport an
+install's status). Read once per program on a worker, the copies in use first, and kept in `versions.ini`. Every copy is kept; the best (Setup
 Wizard, then one with its launcher, then the newest version) is the one Play starts, and the game page lets you
 pick another, which is then remembered ("Use this copy"). Copies inside build, staging or backup folders are shown
 too, ranked last; **System Settings > Ports on this PC** can leave them out.
@@ -118,7 +118,9 @@ makes a build think it is older, to test the update; `SANCTUM_NO_UPDATE=1` turns
 |---|---|
 | `%APPDATA%\SteelTemple\Sanctum\settings.ini` | the player's settings (theme, cover folder, profile icon, ...) |
 | `%APPDATA%\SteelTemple\Sanctum\library.ini` | the ports found by the last search |
-| `%APPDATA%\SteelTemple\Sanctum\playtime.ini` | time played from Sanctum, per port |
+| `%APPDATA%\SteelTemple\Sanctum\playtime.ini` | time played per profile and port (`p<idx>:<id>=seconds|last|sessions`) |
+| `%APPDATA%\SteelTemple\Sanctum\custom_games.ini` | custom PC game shortcuts added by the player |
+| `%APPDATA%\SteelTemple\Sanctum\backups\<port>\` | timestamped ZIP save-file backups |
 | `%LOCALAPPDATA%\SteelTemple\Sanctum\releases\` | each port's GitHub release list and its ETag |
 | `%LOCALAPPDATA%\SteelTemple\Sanctum\downloads\` | packages while downloading (removed once installed) |
 
@@ -149,7 +151,7 @@ no game started; the README screenshots are taken this way). `tools/build.py --n
 | `src/draw.cpp` | text, shapes, button glyphs per pad, icons, tiles, focus ring, status and hint bars |
 | `src/home.cpp` | Home: profile, the row of ports, the round buttons, Power |
 | `src/game.cpp` | a port's page: Play / Download, its launcher, GitHub, tabs, the copies on this PC |
-| `src/settings.cpp` | System Settings, the folder picker, Controllers, pages to come |
+| `src/settings.cpp` | System Settings (Display, Sound, Themes, Cover art, Ports, Storage with drive capacities, Controllers, About), folder picker, dual-stick Controllers tester |
 | `src/ports.cpp` | Get ports, Downloads, Releases & news |
 | `src/install.cpp` | the downloads queue: download, verify, unpack, install, update, Setup Wizards |
 | `src/github.cpp` | each port's releases from GitHub, cached with ETags |
@@ -161,9 +163,11 @@ no game started; the README screenshots are taken this way). `tools/build.py --n
 | `src/catalog.cpp` | the ports, the search of this PC, library.ini |
 | `src/covers.cpp` | cover art from the player's folder, decoded on a worker thread |
 | `src/launch.cpp` | starting a port and coming back when it ends |
-| `src/sound.cpp` | procedural Switch 2-style UI sounds using SDL3 audio |
-| `src/mods.cpp` | per-port mod manager (enable/disable via `mods\.disabled`) |
-| `src/platform.cpp` | Windows Desktop/Start Menu shortcuts, startup registry, Recycle Bin delete, folder size |
+| `src/sound.cpp` | procedural Switch 2-style UI sounds (3 profiles) & optional Home ambient audio using SDL3 audio |
+| `src/mods.cpp` | per-port mod manager (enable/disable via `mods\.disabled` and `.zip` mod installation) |
+| `src/album.cpp` | Switch-style Album screenshots viewer with async thumbnails and full-screen lightbox |
+| `src/discord_rpc.cpp` | optional opt-in Discord Rich Presence over local Windows named pipes (`discord-ipc-0..9`) |
+| `src/platform.cpp` | Windows shortcuts, startup registry, Recycle Bin delete, drive enumeration, folder size, file picker, ZIP archiver, and diagnostics |
 | `src/port_settings.cpp` | a port's own settings page, and the ini editor that keeps the file as it is |
 | `tools/package.py` | the release zip, `dist/SteelTemple-Sanctum-<version>-Portable.zip` (version from `src/selfupdate.h`) |
 | `tools/extract_settings.py` | each port's settings list from its source tree, into `assets/settings/` |

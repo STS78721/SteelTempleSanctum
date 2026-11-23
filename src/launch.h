@@ -44,10 +44,16 @@ void launch_poll(SDL_Window *w);    // each frame (and while waiting): the game'
 const LastRun *last_run(int port);  // this session's last run of the port, or nullptr
 void last_run_clear(int port);
 
-// play time, kept in %APPDATA%\SteelTemple\Sanctum\playtime.ini
+// play time, kept in %APPDATA%\SteelTemple\Sanctum\playtime.ini (tracked per local profile)
 void playtime_load();
 long long played_seconds(int port);
 long long last_played(int port);    // unix time, 0 if never from Sanctum
+int played_sessions(int port);      // number of recorded sessions for active profile
 std::string played_text(int port);  // "Played 3 h 20 min  ·  last today"
+std::string played_duration_short(int port); // "3 h 20 min", "5 min", "< 1 min", or "Not played"
+std::string last_played_short(int port);     // "Today", "Yesterday", "4 days ago", or "Never"
+
+// best-effort save directory for a port install (empty if none exists yet)
+std::string port_save_dir(const Port &p, const Install &in);
 
 }  // namespace sanctum

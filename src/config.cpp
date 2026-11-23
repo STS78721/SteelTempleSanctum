@@ -94,20 +94,46 @@ void config_load() {
         if (k == "theme") g_cfg.theme = v == "light" ? 1 : 0;
         else if (k == "follow") g_cfg.follow = v == "1";
         else if (k == "large_tiles") g_cfg.large_tiles = v == "1";
+        else if (k == "home_sort") g_cfg.home_sort = v == "most_played" ? 1 : v == "az" ? 2 : 0;
+        else if (k == "pinned" && !v.empty()) {
+            size_t p = 0;
+            while (p < v.size()) {
+                size_t c = v.find(',', p);
+                if (c == std::string::npos) c = v.size();
+                std::string id = v.substr(p, c - p);
+                if (!id.empty()) g_cfg.pinned.insert(id);
+                p = c + 1;
+            }
+        }
         else if (k == "sounds") g_cfg.sounds = v == "1";
         else if (k == "sound_volume") g_cfg.sound_volume = v == "low" ? 0 : v == "high" ? 2 : 1;
+        else if (k == "sound_theme") g_cfg.sound_theme = v == "retro" ? 1 : v == "minimal" ? 2 : 0;
+        else if (k == "ambient_bgm") g_cfg.ambient_bgm = v == "hum" ? 1 : v == "custom" ? 2 : 0;
+        else if (k == "bgm_path") g_cfg.bgm_path = v;
         else if (k == "rumble") g_cfg.rumble = v == "1";
         else if (k == "rumble_strength") g_cfg.rumble_strength = v == "low" ? 0 : v == "high" ? 2 : 1;
+        else if (k == "stick_deadzone") g_cfg.stick_deadzone = v == "low" ? 0 : v == "high" ? 2 : 1;
+        else if (k == "force_close_chord") g_cfg.force_close_chord = v == "1";
         else if (k == "hide_dev") g_cfg.hide_dev = v == "1";   // (the older show_dev=0 is left behind on purpose)
         else if (k.rfind("prefer.", 0) == 0 && !v.empty()) g_cfg.prefer[k.substr(7)] = v;
+        else if (k.rfind("cover.", 0) == 0 && !v.empty()) g_cfg.port_covers[k.substr(6)] = v;
+        else if (k.rfind("args.", 0) == 0 && !v.empty()) g_cfg.launch_args[k.substr(5)] = v;
+        else if (k.rfind("env.", 0) == 0 && !v.empty()) g_cfg.launch_env[k.substr(4)] = v;
         else if (k == "fullscreen") g_cfg.fullscreen = v == "1";
         else if (k == "hide_cursor") g_cfg.hide_cursor = v == "1";
+        else if (k == "clock_12h") g_cfg.clock_12h = v == "1";
+        else if (k == "display_name") g_cfg.display_name = v;
+        else if (k == "idle_dim_min") { int m = atoi(v.c_str()); g_cfg.idle_dim_min = (m == 5 || m == 15) ? m : 0; }
         else if (k == "pad_layout") g_cfg.pad_layout = v == "nintendo" ? 1 : v == "xbox" ? 2 : 0;
         else if (k == "button_icons") g_cfg.button_icons = v == "nintendo" ? 1 : v == "xbox" ? 2 : v == "playstation" ? 3 : 0;
         else if (k == "cover_dir") g_cfg.cover_dir = v;
+        else if (k == "screenshots_dir") g_cfg.screenshots_dir = v;
         else if (k == "library_dir") g_cfg.library_dir = v;
         else if (k == "profile" && !v.empty()) g_cfg.profile = v;
         else if (k == "auto_update") g_cfg.auto_update = v == "1";
+        else if (k == "discord_rpc") g_cfg.discord_rpc = v == "1";
+        else if (k == "discord_app_id") g_cfg.discord_app_id = v;
+        else if (k == "last_seen_version") g_cfg.last_seen_version = v;
         else if (k == "avatar" && !v.empty()) g_cfg.avatar = v;
         else if (k == "avatar_bg") g_cfg.avatar_bg = SDL_clamp(atoi(v.c_str()), 0, 15);
         else if (k == "active_profile") g_cfg.active_profile = atoi(v.c_str());
@@ -131,7 +157,14 @@ void config_load() {
         g_cfg.profiles = {{g_cfg.profile, g_cfg.avatar, g_cfg.avatar_bg}};
         g_cfg.active_profile = 0;
     }
-    if (demo_mode()) g_cfg.cover_dir.clear(), g_cfg.library_dir.clear();   // README screenshots: no cover art
+    if (demo_mode()) {
+        g_cfg.cover_dir.clear();
+        g_cfg.library_dir.clear();
+        g_cfg.screenshots_dir.clear();
+        g_cfg.port_covers.clear();
+        g_cfg.discord_rpc = false;
+        g_cfg.idle_dim_min = 0;
+    }
 }
 
 void config_save() {
@@ -141,22 +174,46 @@ void config_save() {
     s += std::string("theme=") + (g_cfg.theme ? "light" : "dark") + "\n";
     s += std::string("follow=") + (g_cfg.follow ? "1" : "0") + "\n";
     s += std::string("large_tiles=") + (g_cfg.large_tiles ? "1" : "0") + "\n";
+    static const char *const sorts[] = {"last_played", "most_played", "az"};
+    s += std::string("home_sort=") + sorts[g_cfg.home_sort % 3] + "\n";
+    if (!g_cfg.pinned.empty()) {
+        std::string pin;
+        for (const std::string &id : g_cfg.pinned) pin += (pin.empty() ? "" : ",") + id;
+        s += "pinned=" + pin + "\n";
+    }
     static const char *const vols[] = {"low", "medium", "high"};
+    static const char *const sthemes[] = {"crisp", "retro", "minimal"};
+    static const char *const bgms[] = {"off", "hum", "custom"};
     s += std::string("sounds=") + (g_cfg.sounds ? "1" : "0") + "\n";
     s += std::string("sound_volume=") + vols[g_cfg.sound_volume % 3] + "\n";
+    s += std::string("sound_theme=") + sthemes[g_cfg.sound_theme % 3] + "\n";
+    s += std::string("ambient_bgm=") + bgms[g_cfg.ambient_bgm % 3] + "\n";
+    if (!g_cfg.bgm_path.empty()) s += "bgm_path=" + g_cfg.bgm_path + "\n";
     s += std::string("rumble=") + (g_cfg.rumble ? "1" : "0") + "\n";
     s += std::string("rumble_strength=") + vols[g_cfg.rumble_strength % 3] + "\n";
+    s += std::string("stick_deadzone=") + vols[g_cfg.stick_deadzone % 3] + "\n";
+    s += std::string("force_close_chord=") + (g_cfg.force_close_chord ? "1" : "0") + "\n";
     s += std::string("hide_dev=") + (g_cfg.hide_dev ? "1" : "0") + "\n";
     for (auto &e : g_cfg.prefer) s += "prefer." + e.first + "=" + e.second + "\n";
+    for (auto &e : g_cfg.port_covers) if (!e.second.empty()) s += "cover." + e.first + "=" + e.second + "\n";
+    for (auto &e : g_cfg.launch_args) if (!e.second.empty()) s += "args." + e.first + "=" + e.second + "\n";
+    for (auto &e : g_cfg.launch_env) if (!e.second.empty()) s += "env." + e.first + "=" + e.second + "\n";
     s += std::string("fullscreen=") + (g_cfg.fullscreen ? "1" : "0") + "\n";
     s += std::string("hide_cursor=") + (g_cfg.hide_cursor ? "1" : "0") + "\n";
+    s += std::string("clock_12h=") + (g_cfg.clock_12h ? "1" : "0") + "\n";
+    if (!g_cfg.display_name.empty()) s += "display_name=" + g_cfg.display_name + "\n";
+    s += "idle_dim_min=" + std::to_string(g_cfg.idle_dim_min) + "\n";
     static const char *const layouts[] = {"auto", "nintendo", "xbox"}, *const icons[] = {"auto", "nintendo", "xbox", "playstation"};
     s += std::string("pad_layout=") + layouts[g_cfg.pad_layout % 3] + "\n";
     s += std::string("button_icons=") + icons[g_cfg.button_icons % 4] + "\n";
     s += "cover_dir=" + g_cfg.cover_dir + "\n";
+    if (!g_cfg.screenshots_dir.empty()) s += "screenshots_dir=" + g_cfg.screenshots_dir + "\n";
     s += "library_dir=" + g_cfg.library_dir + "\n";
     s += "profile=" + g_cfg.profile + "\n";
     s += std::string("auto_update=") + (g_cfg.auto_update ? "1" : "0") + "\n";
+    s += std::string("discord_rpc=") + (g_cfg.discord_rpc ? "1" : "0") + "\n";
+    if (!g_cfg.discord_app_id.empty()) s += "discord_app_id=" + g_cfg.discord_app_id + "\n";
+    if (!g_cfg.last_seen_version.empty()) s += "last_seen_version=" + g_cfg.last_seen_version + "\n";
     s += "avatar=" + g_cfg.avatar + "\n";
     s += "avatar_bg=" + std::to_string(g_cfg.avatar_bg) + "\n";
     s += "active_profile=" + std::to_string(g_cfg.active_profile) + "\n";

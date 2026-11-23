@@ -76,8 +76,12 @@ void Ini::set(const std::string &key, const std::string &value, const std::strin
             lines[i] = l.substr(0, eq + 1) + (eq + 1 < l.size() && l[eq + 1] == ' ' ? " " : "") + value;
             return;
         }
-    // not in the file yet: at the end of its section, or a new section at the end
-    std::string sec = section.empty() ? "settings" : section;
+    // not in the file yet: flat key=value when section is empty (e.g. mastersword_options.ini), else under [section]
+    if (section.empty()) {
+        lines.push_back(k + "=" + value);
+        return;
+    }
+    std::string sec = section;
     int in_sec = -1, last = -1;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string t = trim(lines[i]);

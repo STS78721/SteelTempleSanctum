@@ -57,19 +57,21 @@ struct Port {
     const char *launcher;     // the port's own launcher, or nullptr
     const char *uninstall_key;// HKCU ...\Uninstall\<key> written by its Setup Wizard, or nullptr
     PortColours colours;
+    bool custom = false;      // user-added PC game/port shortcut (custom_games.ini)
 
     std::vector<Install> all;        // every copy found, best first
     std::vector<Install> installs;   // the ones shown (build folders only when Settings asks), best first
     int hidden = 0;                  // build-folder copies left out
     std::vector<Release> releases;   // newest first, from GitHub (or its saved copy)
     const Release *latest() const { return releases.empty() ? nullptr : &releases[0]; }
-    std::string latest_tag() const { return releases.empty() ? known_tag : releases[0].tag; }
+    std::string latest_tag() const { return releases.empty() ? (known_tag ? known_tag : "") : releases[0].tag; }
     std::string download_size() const;   // the package Get ports would fetch
     PortState state() const;
     const Install *best() const { return installs.empty() ? nullptr : &installs[0]; }
 };
 
 std::vector<Port> &ports();
+int builtin_port_count();   // built-in SteelTemple ports (0..N-1); custom games sit at >= N
 
 void library_load();      // the cached list, instantly
 void scan_start();        // the search, on a worker thread
@@ -87,6 +89,8 @@ void catalog_installed(int port, const std::string &dir, const std::string &vers
 std::string catalog_match_folder(const std::string &dir);      // matched port title(s) if dir holds a port, else ""
 int catalog_add_folder(const std::string &dir);                // manually register a port folder; returns ports added
 bool catalog_remove(int port, const std::string &dir);         // drop a deleted/uninstalled copy from library.ini
+int catalog_add_custom(const std::string &exe_path, const std::string &custom_title = {}); // add custom PC game; returns port idx or -1
+bool catalog_remove_custom(int port);                          // remove custom game shortcut (never deletes disk files)
 std::string tag_key(const std::string &s);   // "Beta 6.3" == "Beta-6.3"
 bool port_files(const Port &p, const std::string &dir);   // dir holds this port (its game or its launcher)
 // the game program exists (a port that builds its game on this PC has only its launcher until the first setup)

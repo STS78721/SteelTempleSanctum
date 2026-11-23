@@ -76,6 +76,7 @@ static int worker(void *) {
     SDL_CreateDirectory(dir.c_str());
     std::string status;
     const auto &ps = ports();
+    int bn = builtin_port_count();
     // GitHub allows 60 questions an hour without an account, and an "unchanged" answer counts too: asked at most
     // every 15 minutes (the + button asks at once)
     long long last = atoll(load(dir + "last-check").c_str()), now = (long long)time(nullptr);
@@ -83,7 +84,7 @@ static int worker(void *) {
     bool recent = !g_force && now - last < 15 * 60;
     if (recent) {
         bool fresh_port = false;
-        for (auto &p : ps) fresh_port |= !SDL_GetPathInfo((dir + p.id + ".json").c_str(), nullptr);
+        for (int i = 0; i < bn; ++i) fresh_port |= !SDL_GetPathInfo((dir + ps[i].id + ".json").c_str(), nullptr);
         if (!fresh_port) { g_busy = false; return 0; }
     }
     g_force = false;
@@ -91,7 +92,8 @@ static int worker(void *) {
         std::string stamp = std::to_string(now);
         SDL_SaveFile((dir + "last-check").c_str(), stamp.data(), stamp.size());
     }
-    for (int i = 0; i < (int)ps.size(); ++i) {
+    for (int i = 0; i < bn; ++i) {
+        if (ps[i].custom || !ps[i].repo || !ps[i].repo[0]) continue;
         std::string base = dir + ps[i].id;
         if (recent && SDL_GetPathInfo((base + ".json").c_str(), nullptr)) continue;   // only the new ones
         HttpResult r = http_get(std::string("https://api.github.com/repos/") + ps[i].repo + "/releases?per_page=12",
@@ -118,6 +120,7 @@ void github_load_saved() {
     std::string dir = local_dir() + "releases\\";
     auto &ps = ports();
     for (auto &p : ps) {
+        if (p.custom) continue;
         std::vector<Release> rs;
         if (parse(load(dir + p.id + ".json"), rs) && !rs.empty()) p.releases = std::move(rs);
     }

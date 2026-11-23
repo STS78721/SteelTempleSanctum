@@ -9,6 +9,11 @@
 #include "input.h"
 #include "install.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 namespace sanctum {
 
 ImDrawList *dl() { return ImGui::GetBackgroundDrawList(); }
@@ -162,10 +167,48 @@ void hint_bar(std::initializer_list<std::pair<Nav, const char *>> hints) {
     }
 }
 
+bool system_battery_info(int *pct_out, bool *charging_out) {
+#ifdef _WIN32
+    SYSTEM_POWER_STATUS sps{};
+    if (GetSystemPowerStatus(&sps)) {
+        // 128 = No system battery (desktop PC), 255 = Unknown status
+        if ((sps.BatteryFlag & 128) == 0 && sps.BatteryFlag != 255 && sps.BatteryLifePercent <= 100) {
+            if (pct_out) *pct_out = (int)sps.BatteryLifePercent;
+            if (charging_out) *charging_out = (sps.ACLineStatus == 1) || ((sps.BatteryFlag & 8) != 0);
+            return true;
+        }
+    }
+#endif
+    int pct = -1;
+    SDL_PowerState ps = SDL_GetPowerInfo(nullptr, &pct);
+    if (ps == SDL_POWERSTATE_ON_BATTERY || ps == SDL_POWERSTATE_CHARGING || ps == SDL_POWERSTATE_CHARGED) {
+        if (pct_out) *pct_out = pct;
+        if (charging_out) *charging_out = (ps == SDL_POWERSTATE_CHARGING || ps == SDL_POWERSTATE_CHARGED);
+        return true;
+    }
+    return false;
+}
+
+static void draw_battery_glyph(float x, float y, float w, float h, int pct, bool charging, ImU32 border, ImU32 fill) {
+    frame(x, y, w, h, border, 4, 2);
+    rect(x + w, y + h * 0.28f, 3, h * 0.44f, border, 1);
+    float f = pct >= 0 ? SDL_clamp(pct / 100.0f, 0.0f, 1.0f) : 1.0f;
+    float inner_w = std::max(0.0f, (w - 8) * f);
+    if (inner_w > 0.5f) rect(x + 4, y + 4, inner_w, h - 8, fill, 2);
+    if (charging) {
+        // crisp mini lightning bolt centered on the battery
+        float cx = x + w * 0.5f, cy = y + h * 0.5f;
+        ImU32 bolt = pal().light ? IM_COL32(25, 25, 28, 255) : IM_COL32_WHITE;
+        dl()->AddLine(P(cx + 2, cy - 5), P(cx - 2, cy + 1), bolt, S(2.0f));
+        dl()->AddLine(P(cx - 2, cy + 1), P(cx + 2, cy + 1), bolt, S(2.0f));
+        dl()->AddLine(P(cx + 2, cy + 1), P(cx - 2, cy + 6), bolt, S(2.0f));
+    }
+}
+
 void status_bar(bool show_profile) {
     const Palette &p = pal();
     if (show_profile) avatar_draw_player(67, 46, 23);
-    // right: search status, battery, clock
+    // right: search status, downloads, wireless pad battery, handheld/system battery, clock
     time_t t = time(nullptr);
     struct tm lt;
 #ifdef _WIN32
@@ -173,18 +216,50 @@ void status_bar(bool show_profile) {
 #else
     localtime_r(&t, &lt);
 #endif
-    char clock[16];
-    strftime(clock, sizeof clock, "%H:%M", &lt);
-    float x = 1236 - text(1236, 32, 24, p.text, clock, 1);
-    int pct = -1;
-    SDL_PowerState ps = SDL_GetPowerInfo(nullptr, &pct);
-    if (ps == SDL_POWERSTATE_ON_BATTERY || ps == SDL_POWERSTATE_CHARGING || ps == SDL_POWERSTATE_CHARGED) {
-        x -= 52;
-        frame(x, 36, 34, 18, p.soft, 4, 2);
-        rect(x + 34, 41, 3, 8, p.soft, 1);
-        float f = pct >= 0 ? pct / 100.0f : 1;
-        rect(x + 4, 40, 26 * f, 10, ps == SDL_POWERSTATE_ON_BATTERY && pct < 20 ? p.warn : p.soft, 2);
+    char clock[24];
+    if (cfg().clock_12h) {
+        int hr = lt.tm_hour % 12;
+        if (hr == 0) hr = 12;
+        SDL_snprintf(clock, sizeof clock, "%d:%02d %s", hr, lt.tm_min, lt.tm_hour >= 12 ? "PM" : "AM");
+    } else {
+        strftime(clock, sizeof clock, "%H:%M", &lt);
     }
+    float x = 1236 - text(1236, 32, 24, p.text, clock, 1);
+
+    // Handheld / laptop battery (Legion Go, ROG Ally, Steam Deck Windows, laptops — hidden on desktops)
+    int sys_pct = -1;
+    bool sys_chg = false;
+    if (system_battery_info(&sys_pct, &sys_chg)) {
+        ImU32 fill = sys_chg ? p.ok : (sys_pct >= 0 && sys_pct < 20 ? p.warn : p.text);
+        x -= 16;
+        if (sys_pct >= 0) {
+            char pb[16];
+            SDL_snprintf(pb, sizeof pb, "%d%%", sys_pct);
+            float pw = text(x, 35, 16, sys_chg ? p.ok : (sys_pct < 20 ? p.warn : p.soft), pb, 1);
+            x -= pw + 8;
+        }
+        x -= 38;
+        draw_battery_glyph(x, 36, 34, 18, sys_pct, sys_chg, p.soft, fill);
+    }
+
+    // Wireless controller battery (when a connected pad reports battery level)
+    int pad_pct = -1;
+    bool pad_chg = false;
+    if (input_pad_battery(&pad_pct, &pad_chg)) {
+        ImU32 fill = pad_chg ? p.ok : (pad_pct >= 0 && pad_pct < 20 ? p.warn : p.soft);
+        x -= 18;
+        if (pad_pct >= 0) {
+            char pb[16];
+            SDL_snprintf(pb, sizeof pb, "%d%%", pad_pct);
+            float pw = text(x, 36, 14, pad_chg ? p.ok : (pad_pct < 20 ? p.warn : p.dim), pb, 1);
+            x -= pw + 6;
+        }
+        x -= 30;
+        draw_battery_glyph(x, 38, 26, 14, pad_pct, pad_chg, p.dim, fill);
+        x -= 22;
+        icon(IC_PAD, x + 8, 45, 18, p.soft);
+    }
+
     // a download running: its port and percent, so it is visible from every screen
     for (auto &j : install_jobs()) {
         if (j.phase != PH_DOWNLOAD && j.phase != PH_VERIFY && j.phase != PH_INSTALL) continue;
@@ -262,6 +337,27 @@ void icon(Icon i, float cx, float cy, float s, ImU32 c) {
         d->PathArcTo(P(cx - 0.02f * h, cy), S(0.74f * h), -0.65f, 0.65f, 16); d->PathStroke(c, 0, t); break;
     case IC_PAUSE: L(-0.3f, -0.6f, -0.3f, 0.6f); L(0.3f, -0.6f, 0.3f, 0.6f); break;
     case IC_CLOSE: L(-0.55f, -0.55f, 0.55f, 0.55f); L(-0.55f, 0.55f, 0.55f, -0.55f); break;
+    case IC_ALBUM:   // Switch-style photo frame with mountain & sun
+        R(-0.82f, -0.68f, 0.82f, 0.68f, 0.14f);
+        d->AddCircleFilled(P(cx - 0.32f * h, cy - 0.22f * h), S(0.14f * h), c);
+        L(-0.62f, 0.48f, -0.12f, -0.02f); L(-0.12f, -0.02f, 0.18f, 0.28f);
+        L(0.06f, 0.18f, 0.36f, -0.16f); L(0.36f, -0.16f, 0.68f, 0.48f);
+        break;
+    case IC_PIN:     // pushpin
+        L(-0.42f, -0.72f, 0.42f, -0.72f); L(-0.28f, -0.72f, -0.28f, -0.1f); L(0.28f, -0.72f, 0.28f, -0.1f);
+        L(-0.55f, 0.12f, 0.55f, 0.12f); L(-0.28f, -0.1f, -0.55f, 0.12f); L(0.28f, -0.1f, 0.55f, 0.12f);
+        L(0, 0.12f, 0, 0.82f);
+        break;
+    case IC_STORAGE: // stacked drive bars
+        R(-0.82f, -0.68f, 0.82f, -0.12f, 0.14f);
+        R(-0.82f, 0.12f, 0.82f, 0.68f, 0.14f);
+        d->AddCircleFilled(P(cx + 0.5f * h, cy - 0.4f * h), S(0.09f * h), c);
+        d->AddCircleFilled(P(cx + 0.5f * h, cy + 0.4f * h), S(0.09f * h), c);
+        break;
+    case IC_COPY:    // overlapping sheets
+        R(-0.3f, -0.72f, 0.72f, 0.3f, 0.1f);
+        R(-0.72f, -0.3f, 0.3f, 0.72f, 0.1f);
+        break;
     }
 }
 
@@ -288,6 +384,11 @@ void tile(const Port &p, float x, float y, float sz, float alpha, bool badges, f
         text(x + sz / 2, y + sz * 0.58f, sz * 0.065f, with_alpha(IM_COL32(255, 255, 255, 210), a), p.name, 0.5f);
     }
     if (!badges) return;
+    if (cfg().pinned.count(p.id)) {
+        float pr = sz * 0.065f, pcx = x + pr + sz * 0.045f, pcy = y + pr + sz * 0.045f;
+        circle(pcx, pcy, pr, IM_COL32(0, 0, 0, (int)(175 * alpha)));
+        icon(IC_PIN, pcx, pcy, pr * 1.1f, with_alpha(IM_COL32_WHITE, a));
+    }
     // downloading or installing: a bar across the bottom of the tile
     int idx = (int)(&p - &ports()[0]);
     for (auto &j : install_jobs()) {
