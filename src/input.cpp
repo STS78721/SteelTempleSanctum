@@ -15,6 +15,12 @@ static Nav g_axis_dir = NAV_NONE;
 static double g_last_activity = 0;
 static double g_chord_since = -1;
 static bool g_chord_fired = false;
+static bool g_guide_down = false;
+static bool g_guide_pending = false;
+static SDL_JoystickID g_guide_hit_id = 0;
+static double g_guide_cooldown_until = 0;
+static double g_last_mouse_input = -10.0;
+static float g_last_mx = -1e9f, g_last_my = -1e9f;
 
 float input_deadzone_threshold() {
     static const float kDz[] = {0.35f, 0.55f, 0.72f};
@@ -61,7 +67,10 @@ static Sint64 g_last_rumble_ms = -1000;
 static void use_pad(SDL_JoystickID id) {
     SDL_Gamepad *pad = SDL_GetGamepadFromID(id);
     if (!pad) return;
-    if (cfg().hide_cursor && SDL_CursorVisible()) SDL_HideCursor();
+    if (cfg().hide_cursor) {
+        g_last_mouse_input = -10.0;
+        if (SDL_CursorVisible()) SDL_HideCursor();
+    }
     g_pad_id = id;
     g_pad_native = style_of(pad);
     static const PadStyle icons[] = {PAD_GENERIC, PAD_NINTENDO, PAD_XBOX, PAD_PLAYSTATION};
@@ -123,6 +132,133 @@ bool input_poll_force_close(double now) {
         return true;
     }
     return false;
+}
+
+void input_suppress_guide(double now) {
+    g_guide_down = true;
+    g_guide_pending = false;
+    g_guide_hit_id = 0;
+    g_guide_cooldown_until = now + 0.65;
+    if (g_pressed == NAV_HOME) g_pressed = NAV_NONE;
+}
+
+void input_bg_event(const SDL_Event &e, double now) {
+    if (e.type == SDL_EVENT_GAMEPAD_ADDED || e.type == SDL_EVENT_GAMEPAD_REMOVED) {
+        input_event(e);
+        return;
+    }
+    if (!cfg().guide_overlay) return;
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
+        if (now >= g_guide_cooldown_until && !g_guide_pending) {
+            g_guide_pending = true;
+            g_guide_hit_id = e.gbutton.which;
+        }
+    } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP && e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
+        g_guide_down = false;
+    }
+}
+
+bool input_poll_guide_press(double now) {
+    if (!cfg().guide_overlay) {
+        g_guide_down = false;
+        g_guide_pending = false;
+        return false;
+    }
+    if (g_guide_pending) {
+        g_guide_pending = false;
+        SDL_JoystickID hit = g_guide_hit_id;
+        g_guide_hit_id = 0;
+        if (now >= g_guide_cooldown_until) {
+            g_guide_down = true;
+            g_guide_cooldown_until = now + 0.65;
+            if (hit) use_pad(hit);
+            if (g_pressed == NAV_HOME) g_pressed = NAV_NONE;
+            sanctum_log("input: Guide press latched in background (pad=%u, via=event)", (unsigned)hit);
+            input_rumble(HAP_OK, true);
+            return true;
+        }
+    }
+    SDL_UpdateGamepads();
+    int cnt = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&cnt);
+    bool down = false;
+    SDL_JoystickID hit_id = 0;
+    for (int i = 0; ids && i < cnt; ++i) {
+        SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
+        if (g && SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_GUIDE)) {
+            down = true;
+            hit_id = ids[i];
+            break;
+        }
+    }
+    SDL_free(ids);
+    if (!down) { g_guide_down = false; return false; }
+    if (g_guide_down || now < g_guide_cooldown_until) return false;
+    g_guide_down = true;
+    g_guide_cooldown_until = now + 0.65;
+    if (hit_id) use_pad(hit_id);
+    if (g_pressed == NAV_HOME) g_pressed = NAV_NONE;
+    sanctum_log("input: Guide press detected in background (pad=%u, via=poll)", (unsigned)hit_id);
+    input_rumble(HAP_OK, true);
+    return true;
+}
+
+static bool any_input_held() {
+    SDL_PumpEvents();
+    SDL_UpdateGamepads();
+    int cnt = 0;
+    bool held = false;
+    if (SDL_JoystickID *ids = SDL_GetGamepads(&cnt)) {
+        for (int i = 0; i < cnt && !held; ++i) {
+            SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
+            if (!g) continue;
+            for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b) {
+                if (SDL_GetGamepadButton(g, (SDL_GamepadButton)b)) { held = true; break; }
+            }
+            if (!held && (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000 ||
+                          SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000)) {
+                held = true;
+            }
+        }
+        SDL_free(ids);
+    }
+    if (!held) {
+        int nkeys = 0;
+        if (const bool *ks = SDL_GetKeyboardState(&nkeys)) {
+            static const SDL_Scancode kCheck[] = {
+                SDL_SCANCODE_RETURN, SDL_SCANCODE_KP_ENTER, SDL_SCANCODE_SPACE,
+                SDL_SCANCODE_ESCAPE, SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_HOME,
+            };
+            for (SDL_Scancode sc : kCheck)
+                if ((int)sc < nkeys && ks[sc]) { held = true; break; }
+        }
+    }
+    return held;
+}
+
+void input_wait_buttons_released(int max_ms) {
+    if (!any_input_held()) return;   // 0 ms overhead when resumed via mouse click or automated test
+    Uint64 start = SDL_GetTicks();
+    while (any_input_held() && (int)(SDL_GetTicks() - start) < max_ms) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_EVENT_GAMEPAD_ADDED || ev.type == SDL_EVENT_GAMEPAD_REMOVED) input_event(ev);
+        }
+        SDL_Delay(8);
+    }
+    // Brief settle window so the controller's HID release report reaches all open handles before focus transfers
+    SDL_Delay(35);
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_EVENT_GAMEPAD_ADDED || ev.type == SDL_EVENT_GAMEPAD_REMOVED) input_event(ev);
+    }
+    g_pressed = NAV_NONE;
+    g_held = NAV_NONE;
+    g_axis_dir = NAV_NONE;
+    g_guide_pending = false;
+    g_guide_down = false;
+    sanctum_log("input: waited %llu ms for button release before game handoff",
+                (unsigned long long)(SDL_GetTicks() - start));
 }
 
 void input_rumble(Haptic h, bool force) {
@@ -243,7 +379,12 @@ void input_event(const SDL_Event &e) {
         case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: press(NAV_R); break;
         case SDL_GAMEPAD_BUTTON_START: press(NAV_PLUS); break;
         case SDL_GAMEPAD_BUTTON_BACK: press(NAV_MINUS); break;
-        case SDL_GAMEPAD_BUTTON_GUIDE: press(NAV_HOME); break;
+        case SDL_GAMEPAD_BUTTON_GUIDE:
+            if (a.now >= g_guide_cooldown_until) {
+                g_guide_cooldown_until = a.now + 0.35;
+                press(NAV_HOME);
+            }
+            break;
         default: press(face(SDL_GetGamepadFromID(e.gbutton.which), b));
         }
         break;
@@ -274,7 +415,13 @@ void input_event(const SDL_Event &e) {
             if (e.key.key == SDLK_ESCAPE) a.key_escape = true;
             break;
         }
-        if (down && !e.key.repeat) a.pad = PAD_KEYBOARD;
+        if (down && !e.key.repeat) {
+            a.pad = PAD_KEYBOARD;
+            if (cfg().hide_cursor) {
+                g_last_mouse_input = -10.0;
+                if (SDL_CursorVisible()) SDL_HideCursor();
+            }
+        }
         Nav dir = NAV_NONE;
         switch (e.key.key) {
         case SDLK_LEFT: case SDLK_A: dir = NAV_LEFT; break;
@@ -299,20 +446,36 @@ void input_event(const SDL_Event &e) {
         }
         break;
     }
-    case SDL_EVENT_MOUSE_MOTION:
+    case SDL_EVENT_MOUSE_MOTION: {
         a.mouse = ImVec2((e.motion.x - a.ox) / a.scale, (e.motion.y - a.oy) / a.scale);
-        a.mouse_moved = true;
-        g_last_activity = a.now;
-        if (!SDL_CursorVisible()) SDL_ShowCursor();
+        if (g_last_mx < -1e8f) {
+            // Seed initial mouse coordinates on window open/focus without waking the hidden cursor
+            g_last_mx = e.motion.x, g_last_my = e.motion.y;
+            break;
+        }
+        float dx = e.motion.x - g_last_mx, dy = e.motion.y - g_last_my;
+        if (dx * dx + dy * dy >= 16.0f) {   // ignore 1-3 px desk/sensor jitter
+            g_last_mx = e.motion.x, g_last_my = e.motion.y;
+            a.mouse_moved = true;
+            g_last_activity = a.now;
+            g_last_mouse_input = a.now;
+            if (!SDL_CursorVisible()) SDL_ShowCursor();
+        }
         break;
+    }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         a.mouse = ImVec2((e.button.x - a.ox) / a.scale, (e.button.y - a.oy) / a.scale);
+        g_last_mx = e.button.x, g_last_my = e.button.y;
         g_last_activity = a.now;
+        g_last_mouse_input = a.now;
+        if (!SDL_CursorVisible()) SDL_ShowCursor();
         if (e.button.button == SDL_BUTTON_LEFT) a.clicked = true;
         if (e.button.button == SDL_BUTTON_RIGHT || e.button.button == SDL_BUTTON_X1) press(NAV_B);
         break;
     case SDL_EVENT_MOUSE_WHEEL:
         g_last_activity = a.now;
+        g_last_mouse_input = a.now;
+        if (!SDL_CursorVisible()) SDL_ShowCursor();
         press(e.wheel.y > 0 ? NAV_LEFT : e.wheel.y < 0 ? NAV_RIGHT : NAV_NONE);
         break;
     default: break;
@@ -321,6 +484,11 @@ void input_event(const SDL_Event &e) {
 
 void input_frame() {
     App &a = app();
+    if (cfg().hide_cursor) {
+        if (SDL_CursorVisible() && (a.now - g_last_mouse_input >= 2.5)) SDL_HideCursor();
+    } else if (!SDL_CursorVisible()) {
+        SDL_ShowCursor();
+    }
     // the left stick as a d-pad, with the same repeat
     float dz = input_deadzone_threshold();
     Nav stick = NAV_NONE;

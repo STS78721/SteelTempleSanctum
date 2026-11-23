@@ -44,4 +44,15 @@ const SystemDiag &system_diagnostics();
 // Mounted fixed and removable drives with volume labels, filesystem, total and free bytes.
 std::vector<DriveInfo> list_drives();
 
+// Windows default playback endpoint master volume (0..100) and mute state (for the Quick Overlay slider).
+bool system_volume_get(int *pct_out, bool *muted_out);
+bool system_volume_set(int pct, bool mute);
+
+// Temporarily suppresses Windows' Xbox Game Bar controller Guide button (HKCU\Software\Microsoft\GameBar\
+// UseNexusForGameBarEnabled) while Sanctum is running, and restores the user's exact original setting on exit.
+void gamebar_override_set(bool active);
+
+// True if steam.exe is currently running (cached, used for a helpful Controller settings hint).
+bool is_steam_running();
+
 }  // namespace sanctum

@@ -12,6 +12,7 @@
 #include "catalog.h"
 #include "config.h"
 #include "draw.h"
+#include "github.h"
 #include "json.h"
 #include "launch.h"
 #include "sound.h"
@@ -116,16 +117,21 @@ static std::map<std::string, PortSettings> g_lists;
 
 const PortSettings *port_settings(const char *id) {
     auto it = g_lists.find(id);
-    if (it != g_lists.end()) return it->second.loaded ? &it->second : nullptr;
-    PortSettings &ps = g_lists[id];
+    if (it != g_lists.end() && it->second.loaded) return &it->second;
     std::string path = std::string(SDL_GetBasePath()) + "assets\\settings\\" + id + ".json";
     size_t n = 0;
     char *d = (char *)SDL_LoadFile(path.c_str(), &n);
+    if (!d) {
+        // Fallback to cached remote settings JSON fetched via dynamic catalog.json
+        std::string cached = local_dir() + "settings\\" + id + ".json";
+        d = (char *)SDL_LoadFile(cached.c_str(), &n);
+    }
     if (!d) return nullptr;
     Json j;
     bool ok = json_parse(std::string(d, n), j);
     SDL_free(d);
     if (!ok) return nullptr;
+    PortSettings ps;
     ps.ini = j["ini"].str(), ps.prefix = j["prefix"].str(), ps.read_from = j["read_from"].str();
     for (const Json &pg : j["pages"].arr) {
         SetPage page;
@@ -144,7 +150,9 @@ const PortSettings *port_settings(const char *id) {
         ps.pages.push_back(page);
     }
     ps.loaded = !ps.pages.empty();
-    return ps.loaded ? &ps : nullptr;
+    if (!ps.loaded) return nullptr;
+    g_lists[id] = std::move(ps);
+    return &g_lists[id];
 }
 
 static std::string ini_path(int port) {
@@ -171,12 +179,14 @@ int port_settings_changed(int port) {
 // ======================= the page
 static int g_port = -1, g_page = 0, g_row = 0;
 static bool g_in_rows = false, g_backed_up = false;
+static bool g_presets_open = false;
+static int g_preset_sel = 0;
 static float g_scroll = 0;
 static Ini g_ini;
 static bool g_has_ini = false;
 
 void port_settings_open(int port) {
-    g_port = port, g_page = 0, g_row = 0, g_in_rows = false, g_scroll = 0;
+    g_port = port, g_page = 0, g_row = 0, g_in_rows = false, g_presets_open = false, g_preset_sel = 0, g_scroll = 0;
     g_has_ini = g_ini.load(ini_path(port));
     if (!g_has_ini) g_ini.path = ini_path(port), g_ini.lines.clear();
     g_backed_up = false;
@@ -279,6 +289,165 @@ static void step(const SetRow &r, int dir) {
     }
 }
 
+// ======================= quick graphics presets (schema-validated per port)
+struct QuickPresetInfo {
+    const char *pill;
+    const char *title;
+    const char *subtitle;
+};
+static const QuickPresetInfo kPresets[] = {
+    {"Clean 1080p", "Clean Default (1080p)", "Safe hardware-agnostic baseline: docked 1080p, windowed, Frame Gen off"},
+    {"Balanced 1440p", "Balanced 1440p 60", "Crisp 1440p docked rendering with 16x filtering and low latency"},
+    {"Native 4K", "Native 4K 60", "Full 2160p (4K) docked rendering with 16x filtering and dynamic shrink off"},
+    {"Handheld", "Handheld / Battery", "Handheld 720p profile with VSync frame pacing for lower power draw"},
+};
+static const int kPresetN = 4;
+
+static const SetRow *find_row_by_ini(const PortSettings &s, const char *ini_key) {
+    std::string k = lower(ini_key);
+    for (const auto &pg : s.pages)
+        for (const auto &r : pg.rows)
+            if (r.type != "group" && lower(r.ini) == k) return &r;
+    return nullptr;
+}
+
+static bool row_accepts_value(const SetRow &r, const std::string &val) {
+    if (r.type == "toggle") return val == "0" || val == "1";
+    if (r.type == "choice") return choice_index(r, val) >= 0;
+    return false;
+}
+
+static std::vector<std::pair<const SetRow *, std::string>> preset_pairs(const PortSettings &s, int idx) {
+    std::vector<std::pair<const SetRow *, std::string>> out;
+    bool has_output_res = find_row_by_ini(s, "output_res") != nullptr;
+    auto add = [&](const char *ini_key, const char *val) {
+        const SetRow *r = find_row_by_ini(s, ini_key);
+        if (!r || !row_accepts_value(*r, val)) return;
+        out.push_back({r, val});
+    };
+    switch (idx) {
+    case 0:   // Clean Default (1080p)
+        add("operation_mode", "docked");
+        add("handheld_profile", "0");
+        if (has_output_res) { add("output_res", "0"); add("resolution", "1"); }
+        else add("resolution", "1080");
+        add("fullscreen", "0");
+        add("vk_present", "mailbox");
+        add("vsync", "0");
+        add("upscaler", "fsr");
+        add("upscaling", "0");
+        add("fg_mode", "off");
+        add("fg_engine", "0");
+        add("frame_generation", "0");
+        add("aniso", "16");
+        add("fps", "60");
+        add("low_latency", "auto");
+        add("dynamic_res", "1");
+        break;
+    case 1:   // Balanced 1440p 60
+        add("operation_mode", "docked");
+        add("handheld_profile", "0");
+        if (has_output_res) { add("output_res", "1"); add("resolution", "1"); }
+        else add("resolution", "1440");
+        add("vk_present", "mailbox");
+        add("vsync", "0");
+        add("upscaler", "fsr");
+        add("fg_mode", "off");
+        add("aniso", "16");
+        add("fps", "60");
+        add("low_latency", "boost");
+        add("dynamic_res", "0");
+        break;
+    case 2:   // Native 4K 60
+        add("operation_mode", "docked");
+        add("handheld_profile", "0");
+        if (has_output_res) { add("output_res", "2"); add("resolution", "1"); }
+        else add("resolution", "2160");
+        add("vk_present", "mailbox");
+        add("vsync", "0");
+        add("upscaler", "fsr");
+        add("fg_mode", "off");
+        add("aniso", "16");
+        add("fps", "60");
+        add("low_latency", "boost");
+        add("dynamic_res", "0");
+        break;
+    case 3:   // Handheld / Battery
+        add("operation_mode", "handheld");
+        add("handheld_profile", "1");
+        if (has_output_res) { add("output_res", "0"); add("resolution", "2"); }
+        else add("resolution", "720");
+        add("vk_present", "fifo");
+        add("vsync", "1");
+        add("upscaler", "fsr");
+        add("fg_mode", "off");
+        add("fg_engine", "0");
+        add("frame_generation", "0");
+        add("aniso", "8");
+        add("fps", "60");
+        add("low_latency", "on");
+        add("dynamic_res", "1");
+        break;
+    }
+    return out;
+}
+
+static bool preset_matches(const PortSettings &s, int idx) {
+    auto pairs = preset_pairs(s, idx);
+    if (pairs.empty()) return false;
+    for (auto &[r, val] : pairs) {
+        if (lower(current(*r)) != lower(val)) return false;
+    }
+    return true;
+}
+
+static std::string preset_preview(const PortSettings &s, int idx) {
+    auto pairs = preset_pairs(s, idx);
+    std::string out;
+    int shown_n = 0;
+    for (auto &[r, val] : pairs) {
+        std::string k = lower(r->ini);
+        if (k == "fg_engine" && val == "0") continue;   // frame_generation already shows "FG: Off"
+        std::string v = r->type == "toggle" ? (r->label + ": " + (val == "1" ? "On" : "Off")) : shown(*r, val);
+        if (v.empty()) continue;
+        if (k == "fg_mode" || k == "frame_generation") v = "FG: " + v;
+        else if (k == "aniso") v = "Aniso " + v;
+        else if (k == "fps") v += " fps";
+        if (!out.empty()) out += "  ·  ";
+        out += v;
+        if (++shown_n >= 6) break;
+    }
+    return out;
+}
+
+static void apply_preset(const PortSettings &s, int idx, bool locked) {
+    if (locked) { sound_play(SFX_ERROR); toast("Close the game to change its settings"); return; }
+    auto pairs = preset_pairs(s, idx);
+    if (pairs.empty()) { sound_play(SFX_ERROR); toast("No matching settings for this preset"); return; }
+    if (!g_backed_up && g_has_ini) {
+        std::string bak = g_ini.path + ".sanctum-bak";
+        size_t n = 0;
+        if (void *d = SDL_LoadFile(g_ini.path.c_str(), &n)) { SDL_SaveFile(bak.c_str(), d, n); SDL_free(d); }
+        g_backed_up = true;
+    }
+    int applied = 0;
+    for (auto &[r, val] : pairs) {
+        if (env_fixed(s, *r)) continue;
+        g_ini.set(r->ini, val, r->section);
+        ++applied;
+    }
+    if (applied == 0) { sound_play(SFX_ERROR); toast("Preset values are overridden by environment variables"); return; }
+    if (!g_ini.save()) {
+        sound_play(SFX_ERROR);
+        toast("Could not write " + g_ini.path, 4);
+        g_ini.load(g_ini.path);
+        return;
+    }
+    g_has_ini = true;
+    sound_play(SFX_TOGGLE_ON);
+    toast(std::string("Applied ") + kPresets[idx].title + " (" + std::to_string(applied) + " settings saved)", 3.5);
+}
+
 void port_settings_frame() {
     App &a = app();
     const Palette &p = pal();
@@ -287,11 +456,20 @@ void port_settings_frame() {
     const PortSettings *s = port_settings(port.id);
     if (!s) { go_back(); return; }
     bool locked = running_port() == g_port;   // the game reads its ini at start and writes it from its own menu
+    bool has_presets = !preset_pairs(*s, 0).empty();
 
     const SetPage &page = s->pages[std::min(g_page, (int)s->pages.size() - 1)];
     auto focusable = [&](int i) { return page.rows[i].type != "group"; };
     auto first = [&]() { for (int i = 0; i < (int)page.rows.size(); ++i) if (focusable(i)) return i; return 0; };
     if (g_row >= (int)page.rows.size() || !focusable(g_row)) g_row = first();
+
+    // Hold main navigation while the Quick Presets overlay is open
+    Nav modal_nav = NAV_NONE;
+    bool modal_click = false;
+    if (g_presets_open) {
+        modal_nav = a.nav, modal_click = a.clicked;
+        a.nav = NAV_NONE, a.clicked = false;
+    }
 
     switch (a.nav) {
     case NAV_UP:
@@ -329,6 +507,15 @@ void port_settings_frame() {
         if (env_fixed(*s, page.rows[g_row])) { sound_play(SFX_ERROR); break; }
         step(page.rows[g_row], 1);
         break;
+    case NAV_X:
+        if (has_presets) {
+            g_presets_open = true;
+            g_preset_sel = 0;
+            for (int i = 0; i < kPresetN; ++i)
+                if (preset_matches(*s, i)) { g_preset_sel = i; break; }
+            sound_play(SFX_OK);
+        }
+        break;
     case NAV_Y:
         if (g_in_rows && locked) {
             sound_play(SFX_ERROR);
@@ -362,18 +549,39 @@ void port_settings_frame() {
     rect(340, 150, 1, 500, with_alpha(p.line, 160));
     for (int i = 0; i < (int)s->pages.size() && i < 10; ++i) {
         float y = 150 + i * 48;
-        if (hover(44, y, 280, 42)) {
+        if (!g_presets_open && hover(44, y, 280, 42)) {
             if (a.mouse_moved && !a.clicked && (g_page != i || g_in_rows)) { g_page = i, g_in_rows = false, g_scroll = 0; sound_play(SFX_MOVE); }
             if (a.clicked) { if (g_page != i) sound_play(SFX_MOVE); g_page = i, g_in_rows = false, g_scroll = 0; }
         }
         bool sel = i == g_page;
         if (sel) { rect(44, y, 280, 42, panel, 12); rect(44, y + 8, 4, 26, acc, 2); }
         text(68, y + 11, 17, sel ? p.text : p.soft, fit(17, s->pages[i].title, 240).c_str());
-        if (sel && !g_in_rows) focus_ring(44, y, 280, 42, 12, 3);
+        if (sel && !g_in_rows && !g_presets_open) focus_ring(44, y, 280, 42, 12, 3);
+    }
+
+    // Quick graphics presets ribbon across the top of the settings pane (never overlaps left sidebar)
+    float x = 372, w = 864;
+    if (has_presets) {
+        float py = 148, ph = 38;
+        rect(x, py, w, ph, panel, 11);
+        text(x + 14, py + 12, 12, p.dim, "PRESETS");
+        float px = x + 84;
+        for (int i = 0; i < kPresetN; ++i) {
+            float pw = text_w(13, kPresets[i].pill) + 26;
+            bool act = preset_matches(*s, i);
+            bool hov = !g_presets_open && hover(px, py + 5, pw, 28);
+            if (hov && a.clicked) apply_preset(*s, i, locked);
+            ImU32 fill = act ? with_alpha(acc, 55) : (hov ? p.panel2 : with_alpha(p.bg, 110));
+            rect(px, py + 5, pw, 28, fill, 14);
+            if (act || hov) frame(px, py + 5, pw, 28, act ? acc : p.soft, 14, 1.5f);
+            text(px + pw / 2, py + 11, 13, act ? p.text : p.soft, kPresets[i].pill, 0.5f);
+            px += pw + 8;
+        }
+        text(x + w - 14, py + 12, 12, p.dim, "X  Presets menu", 1);
     }
 
     // the rows, scrolled to keep the focused one in view
-    float x = 372, w = 864, top = 150, bottom = 532;
+    float top = has_presets ? 198.0f : 150.0f, bottom = 536.0f;
     float yy = 0, focus_y = 0;
     std::vector<float> ys;
     for (int i = 0; i < (int)page.rows.size(); ++i) {
@@ -381,7 +589,7 @@ void port_settings_frame() {
         if (i == g_row) focus_y = yy;
         yy += page.rows[i].type == "group" ? 40 : 52;
     }
-    float want = std::max(0.0f, std::min(focus_y - 120, yy - (bottom - top)));
+    float want = std::max(0.0f, std::min(focus_y - 110, yy - (bottom - top)));
     g_scroll = ease(g_scroll, want, 16);
     dl()->PushClipRect(P(x - 10, top - 6), P(x + w + 10, bottom + 6), true);
     for (int i = 0; i < (int)page.rows.size(); ++i) {
@@ -389,10 +597,10 @@ void port_settings_frame() {
         float y = top + ys[i] - g_scroll;
         if (y < top - 60 || y > bottom) continue;
         if (r.type == "group") { text(x + 4, y + 14, 15, acc, r.label.c_str()); continue; }
-        bool f = g_in_rows && i == g_row, mine = false;
+        bool f = g_in_rows && !g_presets_open && i == g_row, mine = false;
         std::string v = current(r, &mine);
         bool fixed = env_fixed(*s, r);
-        if (hover(x, y, w, 44) && !locked) {
+        if (!g_presets_open && hover(x, y, w, 44) && !locked) {
             if (a.mouse_moved && !a.clicked && (!g_in_rows || g_row != i)) { g_in_rows = true, g_row = i; sound_play(SFX_MOVE); }
             if (a.clicked) { g_in_rows = true, g_row = i; if (fixed) sound_play(SFX_ERROR); else { step(r, 1); v = current(r, &mine); } }
         }
@@ -437,12 +645,59 @@ void port_settings_frame() {
         text(x + 18, std::min(560 + h + 6, 616.0f), 13, p.dim, foot.c_str());
     } else {
         text(x + 18, 560, 14, p.soft, (std::to_string(s->count) + " settings, read from the port's own menu. Changes are saved to " +
-                                       s->ini + " at once; Y puts a setting back to the game's default.").c_str());
+                                       s->ini + " at once; X opens Quick Presets, Y resets a setting.").c_str());
         text(x + 18, 584, 13, p.dim, fit(13, "List from " + s->read_from, w - 36).c_str());
     }
     if (locked) text(x + 18, 616, 13, p.warn, "The game is running: close it to change its settings.");
 
-    if (g_in_rows) hint_bar({{NAV_A, "Change"}, {NAV_Y, "Default"}, {NAV_L, "Pages"}, {NAV_B, "Back"}});
+    // Quick Presets overlay (controller-first + mouse clickable)
+    if (g_presets_open) {
+        float mw = 680, mh = 420, mx = 640 - mw / 2, my = 345 - mh / 2;
+        if (modal_nav == NAV_UP) {
+            if (g_preset_sel > 0) { g_preset_sel--; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else if (modal_nav == NAV_DOWN) {
+            if (g_preset_sel < kPresetN - 1) { g_preset_sel++; sound_play(SFX_MOVE); }
+            else sound_play(SFX_EDGE);
+        } else if (modal_nav == NAV_A) {
+            apply_preset(*s, g_preset_sel, locked);
+            g_presets_open = false;
+        } else if (modal_nav == NAV_B || modal_nav == NAV_X) {
+            g_presets_open = false;
+            sound_play(SFX_BACK);
+        }
+        if (modal_click && !hover(mx, my, mw, mh)) {
+            g_presets_open = false;
+            sound_play(SFX_BACK);
+        }
+        if (g_presets_open) {
+            rect(0, 0, 1280, 720, IM_COL32(0, 0, 0, 165));
+            rect(mx, my, mw, mh, p.bg2, 20);
+            rect(mx, my, mw, 4, acc, 2);
+            text(mx + 28, my + 22, 13, acc, (std::string("QUICK PRESETS  ·  ") + port.name).c_str());
+            text(mx + 28, my + 42, 24, p.text, "Choose a graphics profile");
+            text(mx + 28, my + 74, 13, p.dim, "Backs up your existing .ini to .sanctum-bak before applying.");
+            for (int i = 0; i < kPresetN; ++i) {
+                float ry = my + 104 + i * 72;
+                bool hov = hover(mx + 24, ry, mw - 48, 62);
+                if (hov && a.mouse_moved && !modal_click && g_preset_sel != i) { g_preset_sel = i; sound_play(SFX_MOVE); }
+                if (hov && modal_click) { apply_preset(*s, i, locked); g_presets_open = false; break; }
+                bool act = preset_matches(*s, i);
+                rect(mx + 24, ry, mw - 48, 62, i == g_preset_sel ? p.panel2 : p.panel, 12);
+                text(mx + 42, ry + 10, 17, p.text, kPresets[i].title);
+                if (act) text(mx + mw - 42, ry + 12, 13, p.ok, "Active", 1);
+                std::string prev = preset_preview(*s, i);
+                text(mx + 42, ry + 36, 13, p.soft, fit(13, prev.empty() ? kPresets[i].subtitle : prev, mw - 96).c_str());
+                if (i == g_preset_sel) focus_ring(mx + 24, ry, mw - 48, 62, 12, 3);
+            }
+            hint_bar({{NAV_A, "Apply preset"}, {NAV_B, "Cancel"}});
+            return;
+        }
+    }
+
+    if (g_in_rows && has_presets) hint_bar({{NAV_A, "Change"}, {NAV_X, "Presets"}, {NAV_Y, "Default"}, {NAV_L, "Pages"}, {NAV_B, "Back"}});
+    else if (g_in_rows) hint_bar({{NAV_A, "Change"}, {NAV_Y, "Default"}, {NAV_L, "Pages"}, {NAV_B, "Back"}});
+    else if (has_presets) hint_bar({{NAV_A, "Open"}, {NAV_X, "Presets"}, {NAV_L, "Pages"}, {NAV_B, "Back"}});
     else hint_bar({{NAV_A, "Open"}, {NAV_L, "Pages"}, {NAV_B, "Back"}});
 }
 

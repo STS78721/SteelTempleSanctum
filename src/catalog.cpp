@@ -13,7 +13,9 @@
 #include "app.h"
 #include "config.h"
 #include "covers.h"
+#include "github.h"
 #include "install.h"
+#include "json.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -49,11 +51,30 @@ static std::vector<Port> g_ports = {
      {IM_COL32(96, 226, 68, 255), IM_COL32(14, 38, 22, 255)}},
 };
 
-static const int kBuiltinCount = (int)g_ports.size();
-int builtin_port_count() { return kBuiltinCount; }
+static int g_builtin_count = (int)g_ports.size();
+int builtin_port_count() { return g_builtin_count; }
 std::vector<Port> &ports() { return g_ports; }
 
-// Stable string backing for user-added custom PC games (std::deque never invalidates c_str() on push_back)
+int port_index_by_id(const std::string &id) {
+    for (int i = 0; i < (int)g_ports.size(); ++i)
+        if (g_ports[i].id && id == g_ports[i].id) return i;
+    return -1;
+}
+
+// Stable string backing for dynamically discovered ports (catalog.json) and user-added custom PC games
+struct RemoteBacking {
+    std::string id, title, name, repo, known_tag, known_size, cover_key, mono, exe, also, launcher, uninstall_key;
+};
+static std::deque<RemoteBacking> g_remote_store;
+
+static ImU32 parse_hex_color(const std::string &s, ImU32 fallback) {
+    if (s.size() != 7 || s[0] != '#') return fallback;
+    char *end = nullptr;
+    unsigned long v = strtoul(s.c_str() + 1, &end, 16);
+    if (!end || *end != '\0') return fallback;
+    return IM_COL32((v >> 16) & 255, (v >> 8) & 255, v & 255, 255);
+}
+
 struct CustomBacking {
     std::string id, title, name, cover_key, mono, exe, dir;
     PortColours colours;
@@ -353,42 +374,52 @@ static std::string read_version(const std::string &dir, const char *exe) {
     return {};
 }
 
-// ---- results: found on the worker, merged on the UI thread
+// ---- results: found on the worker, merged on the UI thread (uses a thread-safe snapshot of ports)
+struct ScanPort {
+    std::string id, exe, also, launcher, uninstall_key;
+};
+struct ScanResult {
+    std::string id;
+    std::vector<Install> installs;
+};
 static std::mutex g_lock;
-static std::vector<std::vector<Install>> g_found;   // per port, while a search runs
+static std::vector<ScanResult> g_found;   // per scanned port id, while a search runs
 static std::atomic<bool> g_running{false}, g_done{false};
 static std::atomic<int> g_folders{0};
 
-static void add_found(std::vector<std::vector<Install>> &out, size_t port, Install in) {
-    for (Install &e : out[port])
+static bool scan_port_files(const ScanPort &p, const std::string &dir) {
+    return exists(dir + "\\" + p.exe) || (!p.launcher.empty() && exists(dir + "\\" + p.launcher));
+}
+
+static void add_found(std::vector<ScanResult> &out, size_t port, Install in) {
+    for (Install &e : out[port].installs)
         if (lower(e.dir) == lower(in.dir)) {   // the same folder found twice (registry and disk)
             e.registered |= in.registered;
             if (e.version.empty()) e.version = in.version;
             return;
         }
-    out[port].push_back(std::move(in));
+    out[port].installs.push_back(std::move(in));
 }
 
 static void check_folder(const std::string &dir, const char *const *names, int count,
-                         std::vector<std::vector<Install>> &out) {
+                         const std::vector<ScanPort> &sp, std::vector<ScanResult> &out) {
     // names: the file names of this folder (lower case)
-    auto has = [&](const char *f) {
+    auto has = [&](const std::string &f) {
+        if (f.empty()) return false;
         std::string l = lower(f);
         for (int i = 0; i < count; ++i)
             if (l == names[i]) return true;
         return false;
     };
-    for (int i = 0; i < kBuiltinCount; ++i) {
-        const Port &p = g_ports[i];
-        // the game program (built or shipped), or the port's own launcher alone: a fresh install of a port that
-        // builds its game on this PC at the first start has only the launcher
-        bool game = has(p.exe) && (!p.also || has(p.also));
-        if (!game && !(p.launcher && has(p.launcher))) continue;
+    for (size_t i = 0; i < sp.size(); ++i) {
+        const ScanPort &p = sp[i];
+        bool game = has(p.exe) && (p.also.empty() || has(p.also));
+        if (!game && !has(p.launcher)) continue;
         Install in;
         in.dir = dir;
-        in.version = read_version(dir, p.exe);
-        in.launcher = p.launcher && has(p.launcher);
-        add_found(out, (size_t)i, std::move(in));
+        in.version = read_version(dir, p.exe.c_str());
+        in.launcher = has(p.launcher);
+        add_found(out, i, std::move(in));
     }
 }
 
@@ -418,7 +449,7 @@ static bool skip_dir(const wchar_t *n) {
     return false;
 }
 
-static void walk(const std::wstring &dir, int depth, std::vector<std::vector<Install>> &out) {
+static void walk(const std::wstring &dir, int depth, const std::vector<ScanPort> &sp, std::vector<ScanResult> &out) {
     if (++g_folders > 400000) return;   // a hard stop on enormous disks
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileExW((dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr,
@@ -442,29 +473,32 @@ static void walk(const std::wstring &dir, int depth, std::vector<std::vector<Ins
     if (!files.empty()) {
         std::vector<const char *> names;
         for (auto &f : files) names.push_back(f.c_str());
-        check_folder(utf8(dir.c_str()), names.data(), (int)names.size(), out);
+        check_folder(utf8(dir.c_str()), names.data(), (int)names.size(), sp, out);
     }
     if (depth <= 0) return;
-    for (auto &s : subdirs) walk(dir + L"\\" + s, depth - 1, out);
+    for (auto &s : subdirs) walk(dir + L"\\" + s, depth - 1, sp, out);
 }
 #endif
 
-static int search(void *) {
-    std::vector<std::vector<Install>> out((size_t)kBuiltinCount);
+static int search(void *arg) {
+    auto *sp = (std::vector<ScanPort> *)arg;
+    std::vector<ScanResult> out(sp->size());
+    for (size_t i = 0; i < sp->size(); ++i) out[i].id = (*sp)[i].id;
 #ifdef _WIN32
     // 1. the Setup Wizards' entries in Windows' apps list
-    for (int i = 0; i < kBuiltinCount; ++i) {
-        if (!g_ports[i].uninstall_key) continue;
+    for (size_t i = 0; i < sp->size(); ++i) {
+        const ScanPort &p = (*sp)[i];
+        if (p.uninstall_key.empty()) continue;
         std::wstring sub = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\";
-        for (const char *c = g_ports[i].uninstall_key; *c; ++c) sub += (wchar_t)*c;
+        for (char c : p.uninstall_key) sub += (wchar_t)(unsigned char)c;
         std::string dir = reg_string(HKEY_CURRENT_USER, sub, L"InstallLocation");
         while (!dir.empty() && (dir.back() == '\\' || dir.back() == '/')) dir.pop_back();
-        if (dir.empty() || !port_files(g_ports[i], dir)) continue;
+        if (dir.empty() || !scan_port_files(p, dir)) continue;
         Install in;
         in.dir = dir;
         in.version = reg_string(HKEY_CURRENT_USER, sub, L"DisplayVersion");
-        if (in.version.empty()) in.version = read_version(dir, g_ports[i].exe);
-        in.launcher = g_ports[i].launcher && exists(dir + "\\" + g_ports[i].launcher);
+        if (in.version.empty()) in.version = read_version(dir, p.exe.c_str());
+        in.launcher = !p.launcher.empty() && exists(dir + "\\" + p.launcher);
         in.registered = true;
         add_found(out, i, std::move(in));
     }
@@ -474,7 +508,7 @@ static int search(void *) {
         int n = MultiByteToWideChar(CP_UTF8, 0, lib.c_str(), -1, nullptr, 0);
         std::wstring w(n ? n - 1 : 0, L'\0');
         if (n) MultiByteToWideChar(CP_UTF8, 0, lib.c_str(), -1, w.data(), n);
-        if (!w.empty()) walk(w, 3, out);
+        if (!w.empty()) walk(w, 3, *sp, out);
     }
     // 3. every fixed drive, six folders deep (D:\Games\<port>\GAME\totk.exe is four)
     DWORD drives = GetLogicalDrives();
@@ -483,13 +517,12 @@ static int search(void *) {
         wchar_t root[4] = {(wchar_t)(L'A' + d), L':', L'\\', 0};
         if (GetDriveTypeW(root) != DRIVE_FIXED) continue;
         root[2] = 0;
-        walk(root, 6, out);
+        walk(root, 6, *sp, out);
     }
 #endif
-    for (size_t i = 0; i < out.size(); ++i) {
-        for (Install &in : out[i]) in.dev = !in.registered && is_dev_path(in.dir);
-        rank(g_ports[i], out[i]);
-    }
+    for (auto &sr : out)
+        for (Install &in : sr.installs) in.dev = !in.registered && is_dev_path(in.dir);
+    delete sp;
     {
         std::lock_guard<std::mutex> l(g_lock);
         g_found = std::move(out);
@@ -501,12 +534,18 @@ static int search(void *) {
 
 void scan_start() {
     if (g_running) return;
+    auto *sp = new std::vector<ScanPort>();
+    for (int i = 0; i < g_builtin_count && i < (int)g_ports.size(); ++i) {
+        const Port &p = g_ports[i];
+        sp->push_back({p.id ? p.id : "", p.exe ? p.exe : "", p.also ? p.also : "",
+                       p.launcher ? p.launcher : "", p.uninstall_key ? p.uninstall_key : ""});
+    }
     g_running = true;
     g_done = false;
     g_folders = 0;
-    SDL_Thread *t = SDL_CreateThread(search, "scan", nullptr);
+    SDL_Thread *t = SDL_CreateThread(search, "scan", sp);
     if (t) SDL_DetachThread(t);
-    else g_running = false;
+    else { delete sp; g_running = false; }
 }
 
 bool scan_running() { return g_running; }
@@ -519,7 +558,7 @@ static std::string library_path() { return config_dir() + "library.ini"; }
 static void library_save() {
     if (demo_mode()) return;
     std::string s = "# SteelTemple Sanctum: ports found on this PC (rebuilt by every search)\n";
-    for (int i = 0; i < kBuiltinCount && i < (int)g_ports.size(); ++i) {
+    for (int i = 0; i < g_builtin_count && i < (int)g_ports.size(); ++i) {
         const Port &p = g_ports[i];
         for (const Install &in : p.all)
             s += std::string("port=") + p.id + "|" + in.dir + "|" + in.version + "|" + (in.launcher ? "1" : "0") + "|" +
@@ -527,6 +566,83 @@ static void library_save() {
     }
     std::string tmp = library_path() + ".tmp";
     if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), library_path().c_str());
+}
+
+int catalog_merge_json(const std::string &json_text) {
+    Json root;
+    if (!json_parse(json_text, root) || root.type != Json::OBJ) return 0;
+    const Json &arr = root["ports"];
+    if (arr.type != Json::ARR) return 0;
+    int added = 0;
+    for (const Json &it : arr.arr) {
+        if (it.type != Json::OBJ) continue;
+        std::string id = it["id"].str(), title = it["title"].str(), name = it["name"].str();
+        std::string repo = it["repo"].str(), exe = it["exe"].str();
+        if (id.empty() || title.empty() || name.empty() || repo.empty() || exe.empty()) continue;
+        std::string ktag = it["known_tag"].str(), ksize = it["known_size"].str();
+        std::string surl = it["settings_url"].str(), lrel = it["log"].str();
+        int idx = port_index_by_id(id);
+        if (idx >= 0) {
+            Port &p = g_ports[idx];
+            if (!surl.empty()) p.settings_url = surl;
+            if (!lrel.empty()) p.log_rel = lrel;
+            if (!ktag.empty() && (!p.known_tag || version_newer(ktag, p.known_tag))) {
+                g_remote_store.push_back({id, title, name, repo, ktag, ksize, "", "", "", "", "", ""});
+                p.known_tag = g_remote_store.back().known_tag.c_str();
+                if (!ksize.empty()) p.known_size = g_remote_store.back().known_size.c_str();
+            }
+            continue;
+        }
+        if (g_builtin_count >= 60) break;
+        RemoteBacking b;
+        b.id = id;
+        b.title = title;
+        b.name = name;
+        b.repo = repo;
+        b.known_tag = ktag.empty() ? "0.1.0" : ktag;
+        b.known_size = ksize.empty() ? "150 MB" : ksize;
+        b.cover_key = it["cover_key"].str().empty() ? tag_key(title) : it["cover_key"].str();
+        b.mono = it["mono"].str().empty() ? name.substr(0, 4) : it["mono"].str();
+        b.exe = exe;
+        b.also = it["also"].str();
+        b.launcher = it["launcher"].str();
+        b.uninstall_key = it["uninstall_key"].str();
+        g_remote_store.push_back(std::move(b));
+        const RemoteBacking &rb = g_remote_store.back();
+        Port np{};
+        np.id = rb.id.c_str();
+        np.title = rb.title.c_str();
+        np.name = rb.name.c_str();
+        np.repo = rb.repo.c_str();
+        np.known_tag = rb.known_tag.c_str();
+        np.known_size = rb.known_size.c_str();
+        np.cover_key = rb.cover_key.c_str();
+        np.mono = rb.mono.c_str();
+        np.exe = rb.exe.c_str();
+        np.also = rb.also.empty() ? nullptr : rb.also.c_str();
+        np.launcher = rb.launcher.empty() ? nullptr : rb.launcher.c_str();
+        np.uninstall_key = rb.uninstall_key.empty() ? nullptr : rb.uninstall_key.c_str();
+        np.colours = {parse_hex_color(it["accent"].str(), IM_COL32(80, 196, 255, 255)),
+                      parse_hex_color(it["deep"].str(), IM_COL32(18, 34, 52, 255))};
+        np.settings_url = surl;
+        np.log_rel = lrel;
+        int ins_at = g_builtin_count;
+        g_ports.insert(g_ports.begin() + ins_at, std::move(np));
+        ++g_builtin_count;
+        if (app().game >= ins_at) ++app().game;
+        ++added;
+        sanctum_log("catalog: added dynamic port %s (%s)", rb.id.c_str(), rb.repo.c_str());
+    }
+    return added;
+}
+
+void catalog_load_cached() {
+    std::string p = local_dir() + "catalog.json";
+    size_t n = 0;
+    char *d = (char *)SDL_LoadFile(p.c_str(), &n);
+    if (!d) return;
+    catalog_merge_json(std::string(d, n));
+    SDL_free(d);
 }
 
 static const PortColours kCustomPalette[] = {
@@ -566,7 +682,7 @@ static void append_custom_port(CustomBacking b) {
 static void custom_games_save() {
     if (demo_mode()) return;
     std::string s = "# SteelTemple Sanctum: custom PC games added by player (id|title|dir|exe|colour_idx)\n";
-    for (int i = kBuiltinCount; i < (int)g_ports.size(); ++i) {
+    for (int i = g_builtin_count; i < (int)g_ports.size(); ++i) {
         const Port &p = g_ports[i];
         if (!p.custom || p.all.empty()) continue;
         int cidx = 0;
@@ -674,7 +790,7 @@ int catalog_add_custom(const std::string &exe_path, const std::string &custom_ti
     b.mono = make_mono(title);
     b.dir = dir;
     b.exe = exe;
-    b.colours = kCustomPalette[(int)(g_ports.size() - kBuiltinCount) % 6];
+    b.colours = kCustomPalette[(int)(g_ports.size() - g_builtin_count) % 6];
     append_custom_port(std::move(b));
     custom_games_save();
     covers_reload();
@@ -682,7 +798,7 @@ int catalog_add_custom(const std::string &exe_path, const std::string &custom_ti
 }
 
 bool catalog_remove_custom(int port) {
-    if (port < kBuiltinCount || port >= (int)g_ports.size() || !g_ports[port].custom) return false;
+    if (port < g_builtin_count || port >= (int)g_ports.size() || !g_ports[port].custom) return false;
     std::string id = g_ports[port].id;
     g_ports.erase(g_ports.begin() + port);
     cfg().pinned.erase(id);
@@ -713,7 +829,7 @@ void library_load() {
             for (size_t bar; (bar = line.find('|', s)) != std::string::npos; s = bar + 1) f.push_back(line.substr(s, bar - s));
             f.push_back(line.substr(s));
             if (f.size() < 5) continue;
-            for (int i = 0; i < kBuiltinCount; ++i) {
+            for (int i = 0; i < g_builtin_count; ++i) {
                 Port &p = g_ports[i];
                 if (f[0] == p.id && port_files(p, f[1])) {
                     Install in{f[1], f[2], f[3] == "1", f[4] == "1"};
@@ -722,7 +838,7 @@ void library_load() {
                 }
             }
         }
-        for (int i = 0; i < kBuiltinCount; ++i) {   // the versions read last time, from the first frame on
+        for (int i = 0; i < g_builtin_count; ++i) {   // the versions read last time, from the first frame on
             apply_known_versions(g_ports[i], g_ports[i].all);
             rank(g_ports[i], g_ports[i].all);
         }
@@ -737,12 +853,12 @@ void library_load() {
 // another way. The worker reads each program once (8 MB at a time) for every spelling of the port's release tags,
 // a match standing alone (no letter, digit or dot either side); the newest tag found wins.
 struct ProbeJob {
-    int port;
+    std::string port_id;
     std::string dir, exe, dll, id, exe_stem, title, tag_sig;
     std::vector<std::string> tags;   // newest first
 };
 struct ProbeHit {
-    int port;
+    std::string port_id;
     std::string dir, version;
 };
 static std::mutex g_probe_lock;
@@ -933,8 +1049,7 @@ static std::string probe_binary(const std::string &path, const ProbeJob &j) {
     int best = (int)j.tags.size();
     std::string direct;
     auto clean = [](char c) { return !SDL_isalnum((unsigned char)c) && c != '.' && c != '-'; };
-    bool want_direct = j.id == "mastersword" || j.id == "mkw-thwomp" || j.id == "slowseparation" ||
-                       j.id == "shadowracket" || j.id == "wonderbloom" || j.id == "yatmb";
+    bool want_direct = j.id != "totk" && j.id != "dkb-bananas";
     for (const auto &rg : ranges) {
         if (SDL_SeekIO(io, (Sint64)rg.first, SDL_IO_SEEK_SET) < 0) continue;
         Uint64 rem = rg.second;
@@ -1019,7 +1134,7 @@ static int probe_worker(void *p) {
                     cached ? "saved" : "read", (int)j.tags.size());
         if (!v.empty()) {
             std::lock_guard<std::mutex> l(g_probe_lock);
-            g_probe_hits.push_back({j.port, j.dir, v});
+            g_probe_hits.push_back({j.port_id, j.dir, v});
         }
     }
     {
@@ -1084,7 +1199,7 @@ void version_probe_start() {
     if (g_probe_running) { g_probe_again = true; return; }
     if (!g_probe_cache_loaded) probe_cache_load();
     bool quick_changed = false;
-    for (int i = 0; i < kBuiltinCount; ++i) {
+    for (int i = 0; i < g_builtin_count; ++i) {
         std::vector<std::string> prev;
         for (const Install &in : g_ports[i].all) prev.push_back(in.version);
         apply_known_versions(g_ports[i], g_ports[i].all);
@@ -1092,16 +1207,12 @@ void version_probe_start() {
             if (g_ports[i].all[k].version != prev[k]) quick_changed = true;
     }
     if (quick_changed) {
-        for (int i = 0; i < kBuiltinCount; ++i) rank(g_ports[i], g_ports[i].all);
+        for (int i = 0; i < g_builtin_count; ++i) rank(g_ports[i], g_ports[i].all);
         refilter();
         library_save();
     }
-    // each port's copy in use first (the one its tile and Play use), then the other copies, then build folders:
-    // a first read of every program on a developer's PC can take minutes, and the copies that matter come first
-    // per port: its copy in use, the player's other copies, then build folders; then the ports taken in turn
-    // (each one's 1st copy, each one's 2nd, ...), so one port with forty large copies holds nobody else up
-    std::vector<std::vector<ProbeJob>> per((size_t)kBuiltinCount);
-    for (int i = 0; i < kBuiltinCount; ++i) {
+    std::vector<std::vector<ProbeJob>> per((size_t)g_builtin_count);
+    for (int i = 0; i < g_builtin_count; ++i) {
         const Port &p = g_ports[i];
         std::vector<std::string> tags;
         for (const Release &r : p.releases) tags.push_back(r.tag);
@@ -1114,7 +1225,7 @@ void version_probe_start() {
                 if ((pass == 0) != first || (pass == 1 && in.dev) || (pass == 2 && !in.dev)) continue;
                 std::string exe = in.dir + "\\" + p.exe;
                 std::string dll = companion_dll(in.dir, p.id, p.exe);
-                if (exists(exe)) per[i].push_back({i, in.dir, exe, dll, p.id, stem, p.title, sig, tags});
+                if (exists(exe)) per[i].push_back({p.id, in.dir, exe, dll, p.id, stem, p.title, sig, tags});
             }
     }
     auto *jobs = new std::vector<ProbeJob>;
@@ -1140,8 +1251,10 @@ bool version_probe_poll() {
     }
     bool changed = false;
     for (const ProbeHit &h : hits) {
-        const Port &p = g_ports[h.port];
-        for (Install &in : g_ports[h.port].all) {
+        int pi = port_index_by_id(h.port_id);
+        if (pi < 0) continue;
+        const Port &p = g_ports[pi];
+        for (Install &in : g_ports[pi].all) {
             if (lower(in.dir) != lower(h.dir)) continue;
             std::string best = pick_newer_version(p, h.version, read_version(in.dir, p.exe));
             if (!best.empty() && in.version != best) {
@@ -1161,11 +1274,17 @@ bool version_probe_poll() {
 
 bool scan_poll() {
     if (!g_done.exchange(false)) return false;
-    std::lock_guard<std::mutex> l(g_lock);
+    std::vector<ScanResult> results;
+    {
+        std::lock_guard<std::mutex> l(g_lock);
+        results.swap(g_found);
+    }
     bool changed = false;
-    for (size_t i = 0; i < g_ports.size() && i < g_found.size(); ++i) {
-        auto &now = g_ports[i].all;
-        auto &got = g_found[i];
+    for (auto &sr : results) {
+        int pi = port_index_by_id(sr.id);
+        if (pi < 0 || pi >= g_builtin_count) continue;
+        auto &now = g_ports[pi].all;
+        auto &got = sr.installs;
         // a copy without a VERSION file keeps the version Sanctum installed it as
         for (Install &g : got)
             if (g.version.empty())
@@ -1175,15 +1294,15 @@ bool scan_poll() {
         for (const Install &o : now) {
             bool found = false;
             for (const Install &g : got) found |= lower(g.dir) == lower(o.dir);
-            if (!found && port_files(g_ports[i], o.dir)) got.push_back(o);
+            if (!found && port_files(g_ports[pi], o.dir)) got.push_back(o);
         }
         // a version read from the copy's own program beats what the search found (a registry entry, a VERSION file)
-        apply_known_versions(g_ports[i], got);
+        apply_known_versions(g_ports[pi], got);
+        rank(g_ports[pi], got);
         bool same = now.size() == got.size();
         for (size_t k = 0; same && k < now.size(); ++k) same = now[k].dir == got[k].dir && now[k].version == got[k].version;
         if (!same) changed = true;
-        now = got;
-        rank(g_ports[i], now);
+        now = std::move(got);
     }
     refilter();
     library_save();

@@ -9,10 +9,13 @@
 #include <vector>
 
 #include "catalog.h"
+#include "covers.h"
 #include "json.h"
 #include "net.h"
 
 namespace sanctum {
+
+static const char *kCatalogUrl = "https://raw.githubusercontent.com/STS78721/SteelTempleSanctum/main/catalog.json";
 
 std::string local_dir() {
     const char *l = getenv("LOCALAPPDATA");
@@ -21,8 +24,14 @@ std::string local_dir() {
     return d;
 }
 
+struct FetchPort {
+    std::string id, repo, settings_url;
+};
+
 static std::mutex g_lock;
-static std::vector<std::pair<int, std::vector<Release>>> g_ready;
+static std::vector<std::pair<std::string, std::vector<Release>>> g_ready;
+static std::string g_catalog_body;
+static bool g_catalog_ready = false;
 static std::string g_status;
 static std::atomic<bool> g_busy{false}, g_force{false};
 
@@ -71,32 +80,56 @@ static std::string load(const std::string &path) {
     return s;
 }
 
-static int worker(void *) {
+static int worker(void *arg) {
+    auto *fp = (std::vector<FetchPort> *)arg;
     std::string dir = local_dir() + "releases\\";
+    std::string sdir = local_dir() + "settings\\";
     SDL_CreateDirectory(dir.c_str());
+    SDL_CreateDirectory(sdir.c_str());
     std::string status;
-    const auto &ps = ports();
-    int bn = builtin_port_count();
     // GitHub allows 60 questions an hour without an account, and an "unchanged" answer counts too: asked at most
     // every 15 minutes (the + button asks at once)
     long long last = atoll(load(dir + "last-check").c_str()), now = (long long)time(nullptr);
+    bool forced = g_force.exchange(false);
     // a port new to this Sanctum (none of its releases saved yet) is asked for at once, whatever the wait
-    bool recent = !g_force && now - last < 15 * 60;
+    bool recent = !forced && now - last < 15 * 60;
     if (recent) {
-        bool fresh_port = false;
-        for (int i = 0; i < bn; ++i) fresh_port |= !SDL_GetPathInfo((dir + ps[i].id + ".json").c_str(), nullptr);
-        if (!fresh_port) { g_busy = false; return 0; }
+        bool fresh_port = !SDL_GetPathInfo((local_dir() + "catalog.json").c_str(), nullptr);
+        for (const auto &p : *fp) fresh_port |= !SDL_GetPathInfo((dir + p.id + ".json").c_str(), nullptr);
+        if (!fresh_port) { delete fp; g_busy = false; return 0; }
     }
-    g_force = false;
     if (!recent) {
         std::string stamp = std::to_string(now);
         SDL_SaveFile((dir + "last-check").c_str(), stamp.data(), stamp.size());
     }
-    for (int i = 0; i < bn; ++i) {
-        if (ps[i].custom || !ps[i].repo || !ps[i].repo[0]) continue;
-        std::string base = dir + ps[i].id;
+    // 1. Dynamic remote port catalog (raw.githubusercontent.com does not consume the GitHub API rate limit)
+    if (!recent || !SDL_GetPathInfo((local_dir() + "catalog.json").c_str(), nullptr)) {
+        HttpResult cr = http_get(kCatalogUrl, load(local_dir() + "catalog.etag"));
+        if (cr.status == 200 && !cr.body.empty()) {
+            SDL_SaveFile((local_dir() + "catalog.json").c_str(), cr.body.data(), cr.body.size());
+            if (!cr.etag.empty()) SDL_SaveFile((local_dir() + "catalog.etag").c_str(), cr.etag.data(), cr.etag.size());
+            std::lock_guard<std::mutex> l(g_lock);
+            g_catalog_body = std::move(cr.body);
+            g_catalog_ready = true;
+        }
+    }
+    // 2. Each port's GitHub releases (+ remote settings JSON if not bundled locally)
+    for (const auto &p : *fp) {
+        if (p.repo.empty()) continue;
+        if (!p.settings_url.empty()) {
+            std::string local_set = std::string(SDL_GetBasePath()) + "assets\\settings\\" + p.id + ".json";
+            std::string cache_set = sdir + p.id + ".json";
+            if (!SDL_GetPathInfo(local_set.c_str(), nullptr) && (!SDL_GetPathInfo(cache_set.c_str(), nullptr) || forced)) {
+                HttpResult sr = http_get(p.settings_url, load(sdir + p.id + ".etag"));
+                if (sr.status == 200 && !sr.body.empty()) {
+                    SDL_SaveFile(cache_set.c_str(), sr.body.data(), sr.body.size());
+                    if (!sr.etag.empty()) SDL_SaveFile((sdir + p.id + ".etag").c_str(), sr.etag.data(), sr.etag.size());
+                }
+            }
+        }
+        std::string base = dir + p.id;
         if (recent && SDL_GetPathInfo((base + ".json").c_str(), nullptr)) continue;   // only the new ones
-        HttpResult r = http_get(std::string("https://api.github.com/repos/") + ps[i].repo + "/releases?per_page=12",
+        HttpResult r = http_get(std::string("https://api.github.com/repos/") + p.repo + "/releases?per_page=12",
                                 load(base + ".etag"));
         if (r.status == 304) continue;
         if (r.status != 200) { status = r.error.empty() ? "GitHub could not be reached" : r.error; if (!r.status) break; continue; }
@@ -105,8 +138,9 @@ static int worker(void *) {
         SDL_SaveFile((base + ".json").c_str(), r.body.data(), r.body.size());
         if (!r.etag.empty()) SDL_SaveFile((base + ".etag").c_str(), r.etag.data(), r.etag.size());
         std::lock_guard<std::mutex> l(g_lock);
-        g_ready.push_back({i, std::move(rs)});
+        g_ready.push_back({p.id, std::move(rs)});
     }
+    delete fp;
     {
         std::lock_guard<std::mutex> l(g_lock);
         g_status = status.empty() ? std::string() : status + " (showing the releases saved last time)";
@@ -129,19 +163,43 @@ void github_load_saved() {
 void github_refresh(bool force) {
     if (force) g_force = true;
     if (g_busy.exchange(true)) return;
-    SDL_Thread *t = SDL_CreateThread(worker, "github", nullptr);
+    auto *fp = new std::vector<FetchPort>();
+    const auto &ps = ports();
+    int bn = builtin_port_count();
+    for (int i = 0; i < bn && i < (int)ps.size(); ++i)
+        if (!ps[i].custom && ps[i].repo && ps[i].repo[0])
+            fp->push_back({ps[i].id, ps[i].repo, ps[i].settings_url});
+    SDL_Thread *t = SDL_CreateThread(worker, "github", fp);
     if (t) SDL_DetachThread(t);
-    else g_busy = false;
+    else { delete fp; g_busy = false; }
 }
 
 bool github_busy() { return g_busy; }
 
 bool github_poll() {
-    std::lock_guard<std::mutex> l(g_lock);
-    if (g_ready.empty()) return false;
-    for (auto &r : g_ready) ports()[r.first].releases = std::move(r.second);
-    g_ready.clear();
-    return true;
+    std::vector<std::pair<std::string, std::vector<Release>>> ready;
+    std::string cat_body;
+    bool cat_ready = false;
+    {
+        std::lock_guard<std::mutex> l(g_lock);
+        ready.swap(g_ready);
+        if (g_catalog_ready) { cat_body.swap(g_catalog_body); g_catalog_ready = false; cat_ready = true; }
+    }
+    bool changed = false;
+    if (cat_ready && !cat_body.empty()) {
+        int added = catalog_merge_json(cat_body);
+        if (added > 0) {
+            changed = true;
+            covers_reload();
+            scan_start();
+            github_refresh(true);
+        }
+    }
+    for (auto &r : ready) {
+        int idx = port_index_by_id(r.first);
+        if (idx >= 0) ports()[idx].releases = std::move(r.second), changed = true;
+    }
+    return changed;
 }
 
 std::string github_status() {

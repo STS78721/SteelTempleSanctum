@@ -6,7 +6,7 @@
 
 **One home for every SteelTemple PC port.**<br>
 A console-style launcher for Windows that you can drive entirely with a controller: browse your ports, download them,
-keep them up to date, change their settings, and start any game straight from the couch.
+keep them up to date automatically, switch graphics presets, and start any game straight from the couch.
 
 [![Release](https://img.shields.io/github/v/release/STS78721/SteelTempleSanctum?include_prereleases&label=release&color=e8243a)](https://github.com/STS78721/SteelTempleSanctum/releases)
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078d4)
@@ -14,7 +14,7 @@ keep them up to date, change their settings, and start any game straight from th
 ![No game files](https://img.shields.io/badge/game%20files-never%20included-3a3a3a)
 
 [**Download**](https://github.com/STS78721/SteelTempleSanctum/releases) ·
-[Features](#features) · [Supported ports](#supported-ports) · [Controls](#controls) · [How it works](docs/TECHNICAL.md)
+[Features](#features) · [Controls & shortcuts](#controls--power-shortcuts) · [Supported ports](#supported-ports) · [How it works](docs/TECHNICAL.md)
 
 <img src="docs/screenshots/home.png" width="900" alt="Sanctum's Home screen: a row of port tiles and round buttons below">
 
@@ -37,33 +37,57 @@ status bar. Dark and Light themes, **12h/24h clock**, and **OLED Idle Dim** prot
 <img src="docs/screenshots/home-light.png" width="800" alt="Home in the Light theme">
 </div>
 
-### 🎮 Press Play and you're in the game
+### 🎮 Press Play, track last-run FPS, and recover from freezes on the couch
 
-**Play** starts the game itself and skips the port's own launcher. Sanctum steps aside while you play and comes back
-when you quit, on the game's page with a note on how the run went. If something went wrong, the log and the issue
-report are one button away — and if a game ever freezes, hold **Back + Start + L + R** for 2 seconds to force-close it
-safely from the couch. Each port page shows a **TIME PLAYED** card tracked per profile, and you can also add **custom PC
-games** or set per-game **custom launch arguments and environment overrides**.
+**Play** starts the game directly and skips the port's own launcher. Sanctum steps aside while you play and comes back
+when you quit, opening the game's page with a summary of how the run went.
+
+- **Console-style Guide / Home Quick Overlay & Quick Suspend / Resume:** Press your controller's **Guide / Xbox / PS /
+  Switch Home button** (or the **`Home`** key) anytime — inside Sanctum **or while playing a game** — to slide open
+  Sanctum's right-side Quick Overlay. Adjust **Windows master volume** right from the couch, **Suspend game** (minimizes
+  and pauses the game's CPU, GPU, and audio cleanly with a **Quick Resume** badge on Home and the status bar, pausing
+  your play-time counter too), **Resume** right back on the exact frame, toggle Dark/Light theme or fullscreen, check
+  downloads & controller battery, or **Close / Force Quit** the running game in one press. While Sanctum is open, it
+  automatically and reversibly suppresses Windows' Xbox Game Bar controller button (restoring your exact Windows setting
+  when Sanctum closes).
+- **Last-session performance telemetry:** Each port's **TIME PLAYED** card shows per-profile play time, session count,
+  and your **last run's average FPS and 1% low** straight from the game's log.
+- **Couch-friendly freeze recovery:** If a game ever hangs or becomes unresponsive, press the **Guide / Home button** to
+  choose **Force quit game**, or hold **Back + Start + L + R** on your controller for **2 seconds** to force-close it
+  and jump straight back to Sanctum (no keyboard or Task Manager needed). If something crashed, the log and issue
+  reporter are one button away.
+- **Custom games & launch overrides:** Add any other PC `.exe` to your library, or set per-game **custom launch
+  arguments** and **environment variable overrides**.
 
 <div align="center">
 <img src="docs/screenshots/game.png" width="800" alt="A port's page: Play, version, TIME PLAYED card, and the copy that will start">
 </div>
 
-### 🔎 Finds the ports you already have
+### 🔎 Fast detection & live port catalog
 
-At start, Sanctum looks through the Setup Wizards' entries and every drive for ports already on this PC, so nothing
-is installed twice. It reads each copy's real version from its game program, companion renderer DLLs, and `VERSION`
-files (picking the newest component so neither stale `VERSION` files nor launcher/renderer hotfixes misreport updates).
-If you keep a port in an unusual location — or want to launch any other PC `.exe` — add it in **System Settings > Ports
-on this PC**. If you have more than one copy, you pick which one Play starts.
+At start, Sanctum scans Setup Wizard entries and fixed drives for ports already on your PC so nothing is installed
+twice. It reads each copy's exact version directly from its game binary (scanning only PE data sections so cold checks
+finish in under a second), companion renderer DLLs, and `VERSION` files — ranking playable copies above bare launcher
+folders.
 
-### ⬇️ Get ports, update them, read what's new
+- **Dynamic live catalog (`catalog.json`):** New SteelTemple ports and their settings layouts appear automatically in
+  Sanctum when published, without waiting for a launcher update (cached locally for instant offline startup).
+- **Multiple copies supported:** Keep dev builds and release copies side by side and choose which one **Play** starts.
+
+### ⬇️ Zero-touch updates with automatic save backups & background relinking
 
 **Get ports** lists every released port: tick the ones you want and press Download, or use **Update all** to queue every
-available port update in one click. Downloads run in the background while you keep browsing. Each one is checked against
-the SHA-256 that GitHub publishes, and an update keeps a way back if it fails. Every port's release notes can be read on
-its own page — and you can install or roll back to any older release straight from the release notes pane — while
-**Releases & news** puts all of them in one list.
+available update in one press.
+
+- **Automatic pre-update save snapshots:** Before overwriting an existing install during an update, Sanctum
+  automatically zips your save folder into `%APPDATA%\SteelTemple\Sanctum\backups\<port>\` (keeping the last 5 rolling
+  auto snapshots alongside your manual backups).
+- **Zero-touch background auto-relink:** After applying an update package to a port that builds its executable on your
+  PC, Sanctum automatically runs the port's bundled relink step in the background (`Relinking` progress chip in Downloads
+  and the top status bar) so you can press **Play** immediately when it finishes — with automatic rollback if anything
+  fails.
+- **SHA-256 verification & version rollback:** Every download is verified against GitHub's published SHA-256 digest, and
+  you can install or roll back to any earlier release straight from the **Release notes** tab (`X`).
 
 <table>
 <tr>
@@ -75,12 +99,17 @@ its own page — and you can install or roll back to any older release straight 
 </tr>
 </table>
 
-### ⚙️ Each game's own settings, from the couch
+### ⚙️ Each game's own settings + one-press Quick Graphics Presets
 
-A port's **Settings** tab shows the same pages, options and values as the game's own in-game menu, in the port's
-colours — across **all 7 ports** (MKW-THWOMP, MasterSword, TotK SteelTempleBuild, SlowSeparation, ShadowRacket,
-dkb-BANANAS, and WonderBloom). Changes go straight into the game's settings file, keeping its comments and layout
-intact. **Y** puts any option back to the game's default.
+A port's **Settings** tab shows the exact pages, options, descriptions, and defaults from the game's own in-game menu,
+in the port's colours — across **all 8 ports** (MKW-THWOMP, MasterSword, TotK SteelTempleBuild, SlowSeparation,
+ShadowRacket, dkb-BANANAS, WonderBloom, and YATMB), plus any future port added to `catalog.json`.
+
+- **One-press Quick Graphics Presets (`X`):** Switch between **Clean Default (1080p)**, **Balanced 1440p 60**,
+  **Native 4K 60**, and **Handheld / Battery** from the preset bar or the `X` menu. Every preset validates its keys
+  against that port's supported values and automatically backs up your `.ini` to `.sanctum-bak` before writing.
+- **Non-destructive `.ini` editing:** Comments, layout, and unrelated keys stay untouched. Press **`Y`** on any row to
+  reset it back to the game's default.
 
 <table>
 <tr>
@@ -89,15 +118,33 @@ intact. **Y** puts any option back to the game's default.
 </tr>
 </table>
 
-### 💾 Storage overview, save backups & mod manager
+### ⚡ Performance Mode & Unified Smart Cache
+
+**System Settings > Performance** (and the **Quick Overlay**) gives you console-style game boosting and instant library
+loading — completely zero-admin and 100% reversible:
+
+- **Performance Mode (`Auto while gaming` / `Always on` / `Off`):** Automatically boosts launched games to **Above
+  Normal** CPU priority, disables Windows 11 **EcoQoS / E-core throttling** (`ProcessPowerThrottling`), tightens Windows'
+  system timer resolution to **`1 ms`** for smoother frame pacing and higher 1% lows, prevents display/system sleep
+  during controller sessions, switches Windows Power Plan / Power Overlay to **High Performance on AC power** (leaving
+  battery power untouched on laptops and handhelds), and drops Sanctum itself into EcoQoS while trimming its working-set
+  RAM while minimized. Every OS tweak restores cleanly on game Suspend, Exit, or Sanctum close.
+- **Unified Smart Cache (`%LOCALAPPDATA%\SteelTemple\Sanctum\cache\`):** Persistently caches pre-decoded binary
+  thumbnails (`.sthm`) for cover art and Album screenshots for near-instant cold loads, caches recursive folder sizes
+  (`sizes.ini`) so large titles open in `0 ms`, and lets you inspect or clear Sanctum's caches in one click without
+  touching saves, settings, or installed games.
+
+### 💾 Storage, shader cache maintenance, save backups & mods
 
 - **System Settings > Storage** shows every mounted drive's **total capacity, free space, used space, and SteelTemple
   library footprint**, plus one-click download cache cleanup and direct jumps into each title's storage page.
-- Each port's **Files & storage** tab lets you create timestamped **ZIP save-file backups** (pure C++, zero external
-  tools) and safely restore them with a 2-press guard and automatic pre-restore snapshot, verify required files, open
-  logs, or uninstall to the Windows Recycle Bin.
-- Open **Mods** from the Home dock or a port's **Mods** tab — or drag and drop any `.zip` mod straight onto Sanctum — to
-  install and toggle mod folders safely without deleting files.
+- **Shader & pipeline cache tools (`Files & storage`):** View the combined size of generated shader and Vulkan pipeline
+  caches, clear stale caches safely to the Windows Recycle Bin in two presses (handy after GPU driver updates), or
+  pre-warm seed shaders in the background on supported titles.
+- **Save backups & restore:** Create timestamped **ZIP save backups** (pure C++, zero external tools) and restore either
+  manual backups or automatic pre-update snapshots with a 2-press safety guard and pre-restore snapshot.
+- **Mod manager:** Open **Mods** from the Home dock or a port's **Mods** tab — or **drag and drop any `.zip` mod**
+  straight onto Sanctum — to install and toggle mod folders safely without deleting files.
 
 <table>
 <tr>
@@ -111,11 +158,11 @@ intact. **Y** puts any option back to the game's default.
 
 ### 🕹️ Any controller, your button layout
 
-Xbox, PlayStation, Switch Pro, Joy-Con and generic pads all work, and the on-screen hints show your pad's own
-buttons. **System Settings > Controllers** lets you choose the **Button layout** (Automatic, Nintendo with A on the
-right, or Xbox with A at the bottom), **Button icons**, **Controller vibration** and strength (**Low**, **Medium**,
-**High**), **Menu stick deadzone**, the **Force-close chord**, and a live dual-stick, analog trigger, button & battery
-**Controller Tester**. Keyboard and mouse work everywhere too.
+Xbox, PlayStation, Switch Pro, Joy-Con and generic pads all work out of the box, and on-screen prompts match your pad.
+**System Settings > Controllers** lets you choose **Button layout** (Automatic, Nintendo with A on the right, or Xbox
+with A at the bottom), **Button icons**, **Controller vibration** and strength (**Low**, **Medium**, **High**), **Menu
+stick deadzone**, the **Force-close chord**, and a live dual-stick, analog trigger, button & battery **Controller
+Tester**. Keyboard and mouse work everywhere too.
 
 <div align="center">
 <img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: layout, icons, vibration, deadzone, force-close chord, and tester">
@@ -139,7 +186,7 @@ console hum or your own custom `.wav` track).
 - **Album:** Browse screenshots from your ports and Windows Screenshots folder in a Switch-style grid with a full-screen
   lightbox and safe Recycle Bin delete.
 - **Cover art:** Sanctum ships no game art. Point **System Settings > Cover art** at your own folder, pick a custom
-  cover per title, or drag and drop an image straight onto a game tile.
+  cover per title, or **drag and drop a `.png`/`.jpg` image** straight onto a game tile.
 
 <table>
 <tr>
@@ -150,13 +197,46 @@ console hum or your own custom `.wav` track).
 
 ### 🛠️ System diagnostics & optional Discord Rich Presence
 
-**System Settings > About** displays a quick hardware/OS diagnostics summary with one-click **Copy support info** for
-bug reports, manages automatic background self-updates (with a one-time **"What's New"** card after each update), and
+**System Settings > About** displays a hardware/OS diagnostics summary with one-click **Copy support info** for bug
+reports, manages automatic background self-updates (with a one-time **"What's New"** card after each update), and
 includes optional, off-by-default **Discord Rich Presence**.
 
 <div align="center">
 <img src="docs/screenshots/about.png" width="800" alt="System Settings, About Sanctum: version, updates, Discord RPC, shortcuts, and diagnostics">
 </div>
+
+---
+
+## Controls & power shortcuts
+
+> [!TIP]
+> **Sanctum Quick Overlay & Freeze Recovery from your controller:**
+> - **Press the Guide / Xbox / PS / Switch Home button** (anytime in Sanctum or in-game) to slide open the **Sanctum
+>   Quick Overlay** — adjust **System Volume**, **Suspend game (Quick Resume)** to pause CPU/GPU/audio while browsing
+>   Sanctum, **Resume**, **Close**, or **Force Quit** the running game without leaving the couch. Sanctum automatically
+>   suppresses Windows' Xbox Game Bar controller button while open and restores your Windows setting on exit (configurable
+>   in **System Settings > Controllers**; if Steam is also running in the background, disable *"Guide Button Focuses
+>   Steam"* in Steam > Settings > Controller).
+> - **Force-close a frozen game:** Hold **Back + Start + L + R** for **2 seconds** to terminate a hung game immediately
+>   and return straight to Sanctum:
+>   - **Xbox / ROG Ally / Legion Go:** `View + Menu + LB + RB`
+>   - **PlayStation (DualSense / DualShock):** `Create / Share + Options + L1 + R1`
+>   - **Nintendo Switch Pro / Joy-Con:** `− + + + L + R`
+
+| Action | Controller | Keyboard | Mouse |
+|---|---|---|---|
+| **Sanctum Quick Overlay (in Sanctum & in-game)** | **Press `Guide` / `Xbox` / `PS` / `Home`** | `Home` | Click outside to close |
+| **Force-close running / frozen game** | **Hold `Back + Start + L + R` (2 s)** | — | — |
+| Move / navigate | D-pad / Left stick | Arrow keys / `WASD` | Hover / Scroll wheel |
+| Confirm / Play | `A` (or `Cross`) | `Enter` / `Space` | Left click |
+| Back / Cancel | `B` (or `Circle`) | `Esc` / `Backspace` | Right click / Mouse Back |
+| Quick menu (Home) / Quick Presets (Settings) / Install version (Release notes) / Switch package (Get ports) | `X` (or `Square`) | `X` | Click tile menu / preset pill |
+| Open on GitHub / Reset setting to default | `Y` (or `Triangle`) | `Y` / `Tab` | Click button |
+| Switch tabs or settings pages | `L` / `R` (`LB` / `RB`) | `Q` / `E` (`PgUp` / `PgDn`) | Click a tab |
+| Check GitHub for updates & new ports | `+` (`Menu` / `Options`) | `F5` / `=` | — |
+| Secondary / sort action | `−` (`View` / `Share`) | `F1` / `-` | Click sort chip |
+| Toggle Fullscreen | System Settings > Display (or Quick Overlay) | `F11` or `Alt+Enter` | — |
+| Install mod / set custom cover art | — | — | Drag & drop `.zip` or `.png`/`.jpg` onto window |
 
 ---
 
@@ -173,7 +253,8 @@ includes optional, off-by-default **Discord Rich Presence**.
 | Super Mario Bros. Wonder | **WonderBloom** | [STS78721/SMBWONDERBLOOM](https://github.com/STS78721/SMBWONDERBLOOM) |
 | Yoshi and the Mysterious Book | **YATMB** | [STS78721/YATMB](https://github.com/STS78721/YATMB) |
 
-New releases of these ports show up in Sanctum by themselves. Press **+** (Menu / Options) to check right away.
+New SteelTemple ports and releases show up automatically via [`catalog.json`](catalog.json). Press **`+`** (`Menu` /
+`Options` / `F5`) to check right away.
 
 ## Getting started
 
@@ -182,33 +263,21 @@ New releases of these ports show up in Sanctum by themselves. Press **+** (Menu 
 2. Start `SteelTemple-Sanctum.exe`. Ports you already have appear on Home within a few seconds.
    From then on Sanctum updates itself: a new version downloads in the background and goes in when you close it.
 3. Open **Get ports** to download more. A port that builds its game from your files asks for them on its first
-   start, through **Set up** on its page.
+   start, through **Set up** on its page — and future updates automatically back up your saves and relink in the
+   background.
 4. Optional: in **System Settings > About**, add a Desktop or Start Menu shortcut, or turn on **Start with Windows**.
 
 > [!IMPORTANT]
 > Sanctum and the ports never include or download game files. Every port runs from **your own** legally dumped copy
 > of the game.
 
-## Controls
-
-| | Controller | Keyboard | Mouse |
-|---|---|---|---|
-| Move | D-pad / left stick | Arrows / WASD | Hover |
-| Confirm | A | Enter / Space | Left click |
-| Back | B | Esc / Backspace | Right click |
-| Options / GitHub | X / Y | X / Tab | |
-| Switch tabs or pages | L / R | Q / E | Click a tab |
-| Check for ports | + (Menu / Options) | F5 | |
-| Back to Home | Home (Guide) | Home | |
-| Fullscreen | System Settings > Display | F11 or Alt+Enter | |
-
 ## Your privacy
 
-- No account, sign-in or token. Sanctum only reads the public release lists from GitHub, and caches them so it
-  rarely needs to ask.
+- No account, sign-in or token. Sanctum only reads the public catalog and release lists from GitHub, and caches them
+  with ETags so it rarely needs to ask.
 - Nothing about you or your PC is sent anywhere.
-- Your settings, play time and cover-art choice stay in your own Windows profile. Nothing is written into the ports'
-  downloads or releases.
+- Your settings, play time, save backups and cover-art choice stay in your own Windows profile (`%APPDATA%\SteelTemple\Sanctum\`).
+  Nothing is written into the ports' downloads or releases.
 
 ## Building from source
 

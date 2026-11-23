@@ -5,6 +5,7 @@
 #include <map>
 #include <mutex>
 
+#include "cache.h"
 #include "config.h"
 #include "covers.h"
 #include "discord_rpc.h"
@@ -13,6 +14,8 @@
 #include "input.h"
 #include "install.h"
 #include "launch.h"
+#include "overlay.h"
+#include "perf.h"
 #include "platform.h"
 #include "selfupdate.h"
 #include "sound.h"
@@ -32,6 +35,7 @@ static int stor_worker(void *p) {
     auto *dir = (std::string *)p;
     int files = 0;
     long long bytes = folder_size_bytes(*dir, &files);
+    cache_size_put(*dir, bytes, files);
     {
         std::lock_guard<std::mutex> l(g_stor_lock);
         g_stor_sizes[*dir] = {true, false, bytes, files};
@@ -44,7 +48,16 @@ static StorEntry stor_size_of(const std::string &dir, bool force = false) {
     if (dir.empty()) return {true, false, 0, 0};
     std::lock_guard<std::mutex> l(g_stor_lock);
     StorEntry &e = g_stor_sizes[dir];
+    if (!force && !e.ready) {
+        long long cb = 0;
+        int cf = 0;
+        if (cache_size_get(dir, cb, cf)) {
+            e = {true, false, cb, cf};
+            return e;
+        }
+    }
     if (!e.running && (!e.ready || force)) {
+        if (force) cache_size_invalidate(dir);
         e.running = true;
         if (force) e.ready = false;
         SDL_Thread *t = SDL_CreateThread(stor_worker, "storsize", new std::string(dir));
@@ -52,6 +65,22 @@ static StorEntry stor_size_of(const std::string &dir, bool force = false) {
         else e.running = false;
     }
     return e;
+}
+
+static CacheStats g_cache_st{};
+static double g_cache_at = -100.0;
+static double g_clear_cache_armed = -10.0;
+
+static const CacheStats &cached_cache_stats(bool force = false) {
+    if (demo_mode()) {
+        static const CacheStats mock{4200000, 8, 380000, 0, 4580000, 8, 0};
+        return mock;
+    }
+    if (force || app().now - g_cache_at > 3.0) {
+        g_cache_st = cache_stats();
+        g_cache_at = app().now;
+    }
+    return g_cache_st;
 }
 
 static std::vector<DriveInfo> g_drives;
@@ -75,9 +104,9 @@ static const std::vector<DriveInfo> &cached_drives(bool force = false) {
 }
 
 // ======================= System Settings
-enum Cat { CAT_DISPLAY, CAT_SOUND, CAT_THEMES, CAT_COVERS, CAT_LIBRARY, CAT_STORAGE, CAT_CONTROLLERS, CAT_ABOUT, CAT_N };
-static const char *kCatName[] = {"Display", "Sound", "Themes", "Cover art", "Ports on this PC", "Storage", "Controllers", "About Sanctum"};
-static const Icon kCatIcon[] = {IC_DISPLAY, IC_SOUND, IC_PALETTE, IC_FOLDER, IC_LIBRARY, IC_STORAGE, IC_PAD, IC_INFO};
+enum Cat { CAT_DISPLAY, CAT_SOUND, CAT_THEMES, CAT_COVERS, CAT_LIBRARY, CAT_STORAGE, CAT_PERF, CAT_CONTROLLERS, CAT_ABOUT, CAT_N };
+static const char *kCatName[] = {"Display", "Sound", "Themes", "Cover art", "Ports on this PC", "Storage", "Performance", "Controllers", "About Sanctum"};
+static const Icon kCatIcon[] = {IC_DISPLAY, IC_SOUND, IC_PALETTE, IC_FOLDER, IC_LIBRARY, IC_STORAGE, IC_UP, IC_PAD, IC_INFO};
 static int g_cat = 0, g_row = 0;
 static float g_scroll = 0.0f;
 static bool g_in_rows = false;
@@ -103,7 +132,8 @@ enum {
     R_FOLDER, R_SCREENSHOTS_DIR, R_RELOAD,
     R_SEARCH, R_DEV, R_LIBDIR, R_ADD_PORT, R_ADD_CUSTOM, R_PORT,
     R_STOR_DRIVE, R_STOR_CLEAR_DL, R_STOR_OPEN_BAK, R_STOR_PORT,
-    R_PADS, R_LAYOUT, R_ICONS, R_RUMBLE, R_RUMBLE_STR, R_DEADZONE, R_FORCE_CHORD,
+    R_PERF_MODE, R_PERF_POWER, R_PERF_TRIM, R_PERF_CLEAR_CACHE,
+    R_PADS, R_LAYOUT, R_ICONS, R_RUMBLE, R_RUMBLE_STR, R_DEADZONE, R_GUIDE_OVERLAY, R_GUIDE_GAMEBAR, R_FORCE_CHORD,
     R_UPDATE, R_AUTO_UPDATE, R_DISCORD_RPC, R_STARTUP, R_SHORTCUT_DESKTOP, R_SHORTCUT_START, R_COPY_DIAG,
     R_INFO
 };
@@ -162,7 +192,7 @@ static std::vector<Row> rows_of(int cat) {
         r.push_back({"12-hour clock", "", R_CLOCK_12H, true, c.clock_12h});
         std::string dim_lbl = c.idle_dim_min == 5 ? "After 5 min" : c.idle_dim_min == 15 ? "After 15 min" : "Off";
         r.push_back({"Idle dim (OLED protection)", dim_lbl, R_IDLE_DIM});
-        r.push_back({"Hide the mouse pointer while using a controller", "", R_HIDE_CURSOR, true, c.hide_cursor});
+        r.push_back({"Auto-hide mouse cursor", "", R_HIDE_CURSOR, true, c.hide_cursor});
         SDL_DisplayID d = SDL_GetDisplayForWindow(app().window);
         const SDL_DisplayMode *m = d ? SDL_GetDesktopDisplayMode(d) : nullptr;
         const char *name = d && !demo_mode() ? SDL_GetDisplayName(d) : nullptr;
@@ -327,6 +357,39 @@ static std::vector<Row> rows_of(int cat) {
         }
         break;
     }
+    case CAT_PERF: {
+        static const char *const pmodes[] = {"Off", "Auto (while gaming)", "Always on"};
+        {
+            Row hdr;
+            hdr.label = "GAMING BOOST";
+            hdr.value = perf_game_boost_active() ? "Active now" : "Reversible · zero admin";
+            hdr.id = R_INFO;
+            hdr.section_hdr = true;
+            r.push_back(std::move(hdr));
+        }
+        r.push_back({"Performance mode", pmodes[c.perf_mode % 3], R_PERF_MODE});
+        r.push_back({"High-Performance Windows power plan (AC power)", "", R_PERF_POWER, true, c.perf_power_plan});
+        r.push_back({"Trim Sanctum RAM & EcoQoS while in-game", "", R_PERF_TRIM, true, c.perf_trim_ram});
+        r.push_back({"Active boost tweaks", "Above Normal · EcoQoS off · 1 ms timer · Sleep off", R_INFO});
+
+        const CacheStats &cs = cached_cache_stats();
+        {
+            Row hdr;
+            hdr.label = "SMART CACHE";
+            hdr.value = mb(cs.total_bytes) + " total on disk";
+            hdr.id = R_INFO;
+            hdr.section_hdr = true;
+            r.push_back(std::move(hdr));
+        }
+        std::string th_val = mb(cs.thumb_bytes) + "  ·  " + std::to_string(cs.thumb_files) + " thumbs";
+        if (cs.thumb_hits > 0) th_val += " (" + std::to_string(cs.thumb_hits) + " instant hits)";
+        r.push_back({"Cover & Album thumbnail cache", th_val, R_INFO});
+        r.push_back({"Catalog, releases & folder-size index", mb(cs.meta_bytes) + "  ·  Instant load", R_INFO});
+        r.push_back({"Download package cache", cs.download_bytes > 0 ? mb(cs.download_bytes) : "Empty", R_INFO});
+        bool armed = app().now - g_clear_cache_armed < 4.0;
+        r.push_back({"Clear Sanctum caches", armed ? "Press again to clear (keeps saves & games)" : "Thumbnails, size index & downloads", R_PERF_CLEAR_CACHE});
+        break;
+    }
     case CAT_CONTROLLERS: {
         static const char *const layouts[] = {"Automatic", "Nintendo (A right)", "Xbox (A bottom)"};
         static const char *const icons[] = {"Automatic", "Nintendo", "Xbox", "PlayStation"};
@@ -337,8 +400,13 @@ static std::vector<Row> rows_of(int cat) {
         r.push_back({"Controller vibration", "", R_RUMBLE, true, c.rumble});
         r.push_back({"Vibration strength", strengths[c.rumble_strength % 3], R_RUMBLE_STR});
         r.push_back({"Menu stick deadzone", dzs[c.stick_deadzone % 3], R_DEADZONE});
+        r.push_back({"Guide / Home button Quick Overlay", "", R_GUIDE_OVERLAY, true, c.guide_overlay});
+        if (c.guide_overlay)
+            r.push_back({"Override Xbox Game Bar button while open", "", R_GUIDE_GAMEBAR, true, c.guide_override_gamebar});
         r.push_back({"Force-close chord (Back + Start + L + R for 2 s)", "", R_FORCE_CHORD, true, c.force_close_chord});
         r.push_back({"Test controllers", "Sticks, triggers, buttons & battery", R_PADS});
+        if (!demo_mode() && is_steam_running())
+            r.push_back({"Steam detected", "Turn off 'Guide Button Focuses Steam' in Steam > Controller", R_INFO});
         r.push_back({"Automatic layout", "A confirms where each pad prints it", R_INFO});
         break;
     }
@@ -401,7 +469,12 @@ static void act(const Row &r) {
         c.idle_dim_min = c.idle_dim_min == 0 ? 5 : c.idle_dim_min == 5 ? 15 : 0;
         sound_play(SFX_OK);
         break;
-    case R_HIDE_CURSOR: c.hide_cursor = !c.hide_cursor; if (!c.hide_cursor) SDL_ShowCursor(); sound_play(c.hide_cursor ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
+    case R_HIDE_CURSOR:
+        c.hide_cursor = !c.hide_cursor;
+        if (c.hide_cursor) SDL_HideCursor();
+        else SDL_ShowCursor();
+        sound_play(c.hide_cursor ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        break;
     case R_SOUNDS:
         c.sounds = !c.sounds;
         sound_set_enabled(c.sounds);
@@ -498,6 +571,41 @@ static void act(const Row &r) {
     case R_STOR_PORT:
         if (r.aux >= 0 && r.aux < (int)ports().size()) game_open_tab(r.aux, 4);
         return;
+    case R_PERF_MODE:
+        c.perf_mode = (c.perf_mode + 1) % 3;
+        perf_sync_idle();
+        sound_play(c.perf_mode ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        toast("Performance mode: " + perf_status_short());
+        break;
+    case R_PERF_POWER:
+        c.perf_power_plan = !c.perf_power_plan;
+        perf_sync_idle();
+        sound_play(c.perf_power_plan ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        toast(c.perf_power_plan ? "High-Performance power plan enabled on AC power" : "Windows power plan left unchanged");
+        break;
+    case R_PERF_TRIM:
+        c.perf_trim_ram = !c.perf_trim_ram;
+        sound_play(c.perf_trim_ram ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        break;
+    case R_PERF_CLEAR_CACHE:
+        if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: caches unchanged"); return; }
+        if (app().now - g_clear_cache_armed < 4.0) {
+            g_clear_cache_armed = -10.0;
+            cache_clear_sanctum();
+            {
+                std::lock_guard<std::mutex> l(g_stor_lock);
+                g_stor_sizes.clear();
+            }
+            cached_cache_stats(true);
+            covers_reload();
+            sound_play(SFX_TOGGLE_ON);
+            toast("Cleared Sanctum thumbnail, size, and download caches", 3.5);
+        } else {
+            g_clear_cache_armed = app().now;
+            sound_play(SFX_ERROR);
+            toast("Press again to clear Sanctum caches (saves & games stay safe)", 4);
+        }
+        return;
     case R_PADS: go(SCR_CONTROLLERS); return;
     case R_RUMBLE:
         c.rumble = !c.rumble;
@@ -512,6 +620,20 @@ static void act(const Row &r) {
     case R_DEADZONE:
         c.stick_deadzone = (c.stick_deadzone + 1) % 3;
         sound_play(SFX_OK);
+        break;
+    case R_GUIDE_OVERLAY:
+        c.guide_overlay = !c.guide_overlay;
+        if (!c.guide_overlay) overlay_close();
+        if (!demo_mode()) gamebar_override_set(c.guide_overlay && c.guide_override_gamebar);
+        sound_play(c.guide_overlay ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        toast(c.guide_overlay ? "Guide / Home button opens Sanctum Quick Overlay" : "Guide / Home button returns to Home");
+        break;
+    case R_GUIDE_GAMEBAR:
+        c.guide_override_gamebar = !c.guide_override_gamebar;
+        if (!demo_mode()) gamebar_override_set(c.guide_overlay && c.guide_override_gamebar);
+        sound_play(c.guide_override_gamebar ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        toast(c.guide_override_gamebar ? "Xbox Game Bar controller button suppressed while Sanctum runs"
+                                       : "Restored Windows Xbox Game Bar controller button", 3.5);
         break;
     case R_FORCE_CHORD:
         c.force_close_chord = !c.force_close_chord;

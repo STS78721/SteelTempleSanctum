@@ -14,13 +14,13 @@
 namespace sanctum {
 
 // ======================= Get ports
-static bool g_sel[32];
-static int g_pkg[32];          // ASSET_PORTABLE or ASSET_WIZARD, per port
+static bool g_sel[64];
+static int g_pkg[64];          // ASSET_PORTABLE or ASSET_WIZARD, per port
 static int g_focus = 0;        // a card, or ports().size() for the Download button
 static const int kCols = 3;
 
 void get_ports_select(int port) {
-    if (port >= 0 && port < 32) g_sel[port] = true, g_focus = port;
+    if (port >= 0 && port < 64) g_sel[port] = true, g_focus = port;
     go(SCR_PORTS);
 }
 
@@ -235,7 +235,7 @@ static int step_of(const JobView &j) {
     switch (j.phase == PH_FAILED || j.phase == PH_CANCELLED ? j.reached : j.phase) {
     case PH_QUEUED: case PH_DOWNLOAD: return 0;
     case PH_VERIFY: return 1;
-    case PH_INSTALL: case PH_WIZARD: return 2;
+    case PH_INSTALL: case PH_RELINK: case PH_WIZARD: return 2;
     default: return 3;
     }
 }
@@ -315,9 +315,10 @@ void downloads_frame() {
             }
             break;
         case PH_VERIFY: left = "Checking it against GitHub's checksum"; break;
-        case PH_INSTALL: left = j.kind == JOB_UPDATE ? "Putting the new files in place (your saves and settings stay)" : "Unpacking"; break;
+        case PH_INSTALL: left = j.kind == JOB_UPDATE ? "Backing up saves & applying update files" : "Unpacking"; break;
+        case PH_RELINK: left = "Relinking " + std::string(port.exe ? port.exe : "game") + " with updated runtime (10-20 s)..."; break;
         case PH_WIZARD: left = "The port's own setup is open"; break;
-        case PH_DONE: frac = 1; left = j.dest.empty() ? "Done" : "In " + j.dest; break;
+        case PH_DONE: frac = 1; left = j.relinked ? ("Updated & relinked in " + j.dest) : (j.dest.empty() ? "Done" : "In " + j.dest); break;
         case PH_FAILED: frac = 0; left = j.error; break;
         case PH_CANCELLED: frac = 0; left = "Cancelled"; break;
         }

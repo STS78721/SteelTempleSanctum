@@ -34,14 +34,20 @@ std::string missing_for_play(const Port &p, const Install &in);   // "" when rea
 
 bool launch(SDL_Window *w, int port, const Install &in, bool own_launcher);
 bool game_running();
+bool game_suspended();              // true when the running game is paused via Quick Suspend (0% CPU/GPU)
 bool launch_starting();             // started, its window not up yet: Sanctum shows its Starting screen
 std::string launch_starting_title();
 int running_port();                 // -1 when none
 double running_seconds();
-void close_game();                  // ends the running game (the player asked, from Sanctum)
+void close_game(bool force = false); // ends the running game (force=true terminates hung/frozen games)
+void launch_wake_sanctum(SDL_Window *w); // brings Sanctum to front while a game keeps running (in-game Guide overlay)
+void launch_overlay_pause(bool pause); // soft-pauses running game while Quick Overlay / Sanctum is in front (blocks input bleed)
+bool suspend_game(SDL_Window *w);    // minimizes and pauses the running game (Quick Resume)
+bool resume_game(SDL_Window *w);     // un-suspends (if paused), hands foreground back to the game, minimizes Sanctum
+void launch_on_shutdown();           // ensures no suspended game is left frozen if Sanctum exits
 void launch_poll(SDL_Window *w);    // each frame (and while waiting): the game's end, and the last-run check
 
-const LastRun *last_run(int port);  // this session's last run of the port, or nullptr
+bool last_run(int port, LastRun &out);  // copies this session's last run of the port (never returns a dangling ptr)
 void last_run_clear(int port);
 
 // play time, kept in %APPDATA%\SteelTemple\Sanctum\playtime.ini (tracked per local profile)
@@ -55,5 +61,31 @@ std::string last_played_short(int port);     // "Today", "Yesterday", "4 days ag
 
 // best-effort save directory for a port install (empty if none exists yet)
 std::string port_save_dir(const Port &p, const Install &in);
+
+// last-session performance telemetry parsed from the port's log (cached by file size & mtime)
+struct PerfSummary {
+    bool valid = false;
+    float avg_fps = 0.0f;
+    float low1_fps = 0.0f;
+    int frames = 0;
+    int val_errs = 0;
+    int shader_errs = 0;
+    std::string text;   // e.g. "59.4 fps  ·  1% low 52.6"
+};
+PerfSummary port_last_perf(const Port &p, const Install &in);
+
+// async headless shader pre-warm (<exe> --prepare-shaders with CREATE_NO_WINDOW + live progress)
+struct WarmState {
+    bool active = false;
+    int port = -1;
+    int stage = 0;        // 1 = translating shaders, 2 = building driver pipelines
+    long long done = 0;
+    long long total = 0;
+    std::string label;    // human-readable live status
+};
+bool launch_prepare_shaders(int port, const Install &in);
+void cancel_prepare_shaders();
+bool shaders_warming();
+WarmState shader_warm_state();
 
 }  // namespace sanctum

@@ -114,6 +114,11 @@ void config_load() {
         else if (k == "rumble_strength") g_cfg.rumble_strength = v == "low" ? 0 : v == "high" ? 2 : 1;
         else if (k == "stick_deadzone") g_cfg.stick_deadzone = v == "low" ? 0 : v == "high" ? 2 : 1;
         else if (k == "force_close_chord") g_cfg.force_close_chord = v == "1";
+        else if (k == "guide_overlay") g_cfg.guide_overlay = v == "1";
+        else if (k == "guide_override_gamebar") g_cfg.guide_override_gamebar = v == "1";
+        else if (k == "perf_mode") g_cfg.perf_mode = v == "off" ? 0 : v == "always" ? 2 : 1;
+        else if (k == "perf_power_plan") g_cfg.perf_power_plan = v == "1";
+        else if (k == "perf_trim_ram") g_cfg.perf_trim_ram = v == "1";
         else if (k == "hide_dev") g_cfg.hide_dev = v == "1";   // (the older show_dev=0 is left behind on purpose)
         else if (k.rfind("prefer.", 0) == 0 && !v.empty()) g_cfg.prefer[k.substr(7)] = v;
         else if (k.rfind("cover.", 0) == 0 && !v.empty()) g_cfg.port_covers[k.substr(6)] = v;
@@ -193,6 +198,12 @@ void config_save() {
     s += std::string("rumble_strength=") + vols[g_cfg.rumble_strength % 3] + "\n";
     s += std::string("stick_deadzone=") + vols[g_cfg.stick_deadzone % 3] + "\n";
     s += std::string("force_close_chord=") + (g_cfg.force_close_chord ? "1" : "0") + "\n";
+    s += std::string("guide_overlay=") + (g_cfg.guide_overlay ? "1" : "0") + "\n";
+    s += std::string("guide_override_gamebar=") + (g_cfg.guide_override_gamebar ? "1" : "0") + "\n";
+    static const char *const pmodes[] = {"off", "auto", "always"};
+    s += std::string("perf_mode=") + pmodes[g_cfg.perf_mode % 3] + "\n";
+    s += std::string("perf_power_plan=") + (g_cfg.perf_power_plan ? "1" : "0") + "\n";
+    s += std::string("perf_trim_ram=") + (g_cfg.perf_trim_ram ? "1" : "0") + "\n";
     s += std::string("hide_dev=") + (g_cfg.hide_dev ? "1" : "0") + "\n";
     for (auto &e : g_cfg.prefer) s += "prefer." + e.first + "=" + e.second + "\n";
     for (auto &e : g_cfg.port_covers) if (!e.second.empty()) s += "cover." + e.first + "=" + e.second + "\n";

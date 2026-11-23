@@ -29,6 +29,11 @@ struct Config {
     int rumble_strength = 1;      // 0 low, 1 medium, 2 high
     int stick_deadzone = 1;       // 0 low (0.35), 1 default (0.55), 2 high (0.72)
     bool force_close_chord = true;// hold Back+Start+L+R for 2 s while a game runs to close it
+    bool guide_overlay = true;    // Guide / PS / Home button opens Sanctum's Quick Overlay (in Sanctum & in-game)
+    bool guide_override_gamebar = true; // temporarily suppresses Windows' Xbox Game Bar controller button while open
+    int perf_mode = 1;            // 0 Off, 1 Auto (boost while gaming), 2 Always On
+    bool perf_power_plan = true;  // switch to High Performance Windows power plan/overlay on AC power
+    bool perf_trim_ram = true;    // drop Sanctum to EcoQoS + trim working set RAM while minimized in-game
     bool hide_dev = false;        // leave out copies inside build / staging / backup folders (they rank last anyway)
     std::map<std::string, std::string> prefer;   // port id -> the copy the player chose ("Use this copy")
     bool fullscreen = true;       // starts fullscreen, like a console

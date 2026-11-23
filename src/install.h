@@ -21,7 +21,7 @@
 namespace sanctum {
 
 enum JobKind { JOB_INSTALL, JOB_UPDATE, JOB_WIZARD };
-enum JobPhase { PH_QUEUED, PH_DOWNLOAD, PH_VERIFY, PH_INSTALL, PH_WIZARD, PH_DONE, PH_FAILED, PH_CANCELLED };
+enum JobPhase { PH_QUEUED, PH_DOWNLOAD, PH_VERIFY, PH_INSTALL, PH_RELINK, PH_WIZARD, PH_DONE, PH_FAILED, PH_CANCELLED };
 
 struct JobView {
     int id, port, kind, phase;
@@ -29,6 +29,8 @@ struct JobView {
     std::string tag, file, dest, error;
     long long done = 0, total = 0;
     double speed = 0;   // bytes a second while downloading
+    bool relinked = false;
+    bool backed_up_saves = false;
 };
 
 // queue a release file for a port; dest: the folder an update goes over (empty for a new install)

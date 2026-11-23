@@ -8,10 +8,13 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <tlhelp32.h>
 #endif
 
 namespace sanctum {
@@ -404,6 +407,101 @@ std::vector<DriveInfo> list_drives() {
     return out;
 }
 
+static const GUID kClsidMMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
+static const GUID kIidIMMDeviceEnumerator  = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+static const GUID kIidIAudioEndpointVolume = {0x5CDF2C82, 0x841E, 0x4546, {0x97, 0x22, 0x0C, 0xF7, 0x40, 0x78, 0x22, 0x9A}};
+
+template <typename Fn>
+static bool with_endpoint_volume(Fn &&fn) {
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(co);
+    if (FAILED(co) && co != RPC_E_CHANGED_MODE) return false;
+    bool ok = false;
+    IMMDeviceEnumerator *en = nullptr;
+    if (SUCCEEDED(CoCreateInstance(kClsidMMDeviceEnumerator, nullptr, CLSCTX_ALL, kIidIMMDeviceEnumerator, (void **)&en)) && en) {
+        IMMDevice *dev = nullptr;
+        if (SUCCEEDED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev)) && dev) {
+            IAudioEndpointVolume *vol = nullptr;
+            if (SUCCEEDED(dev->Activate(kIidIAudioEndpointVolume, CLSCTX_ALL, nullptr, (void **)&vol)) && vol) {
+                ok = fn(vol);
+                vol->Release();
+            }
+            dev->Release();
+        }
+        en->Release();
+    }
+    if (uninit) CoUninitialize();
+    return ok;
+}
+
+bool system_volume_get(int *pct_out, bool *muted_out) {
+    return with_endpoint_volume([&](IAudioEndpointVolume *vol) {
+        float scalar = 0.0f;
+        BOOL muted = FALSE;
+        if (FAILED(vol->GetMasterVolumeLevelScalar(&scalar))) return false;
+        vol->GetMute(&muted);
+        if (pct_out) *pct_out = (int)(scalar * 100.0f + 0.5f);
+        if (muted_out) *muted_out = muted != FALSE;
+        return true;
+    });
+}
+
+bool system_volume_set(int pct, bool mute) {
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return with_endpoint_volume([&](IAudioEndpointVolume *vol) {
+        bool ok1 = SUCCEEDED(vol->SetMasterVolumeLevelScalar(pct / 100.0f, nullptr));
+        bool ok2 = SUCCEEDED(vol->SetMute(mute ? TRUE : FALSE, nullptr));
+        return ok1 && ok2;
+    });
+}
+
+// Reversible Xbox Game Bar Guide-button override (only active while Sanctum runs; restores original value on exit)
+static const wchar_t *kGameBarKey = L"Software\\Microsoft\\GameBar";
+static const wchar_t *kGameBarVal = L"UseNexusForGameBarEnabled";
+static bool g_gb_active = false;
+static bool g_gb_had_orig = false;
+static DWORD g_gb_orig = 1;
+
+void gamebar_override_set(bool active) {
+    if (active == g_gb_active) return;
+    if (active) {
+        DWORD v = 0, sz = sizeof v;
+        LONG r = RegGetValueW(HKEY_CURRENT_USER, kGameBarKey, kGameBarVal, RRF_RT_REG_DWORD, nullptr, &v, &sz);
+        g_gb_had_orig = (r == ERROR_SUCCESS);
+        g_gb_orig = g_gb_had_orig ? v : 1;
+        DWORD zero = 0;
+        if (RegSetKeyValueW(HKEY_CURRENT_USER, kGameBarKey, kGameBarVal, REG_DWORD, &zero, sizeof zero) == ERROR_SUCCESS)
+            g_gb_active = true;
+    } else {
+        if (g_gb_had_orig)
+            RegSetKeyValueW(HKEY_CURRENT_USER, kGameBarKey, kGameBarVal, REG_DWORD, &g_gb_orig, sizeof g_gb_orig);
+        else
+            RegDeleteKeyValueW(HKEY_CURRENT_USER, kGameBarKey, kGameBarVal);
+        g_gb_active = false;
+    }
+}
+
+bool is_steam_running() {
+    static Uint64 last_check = 0;
+    static bool cached = false;
+    Uint64 now = SDL_GetTicks();
+    if (last_check && now - last_check < 5000) return cached;
+    last_check = now;
+    cached = false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof pe;
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (_wcsicmp(pe.szExeFile, L"steam.exe") == 0) { cached = true; break; }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return cached;
+}
+
 #else
 bool shortcut_create_desktop() { return false; }
 bool shortcut_create_startmenu() { return false; }
@@ -415,6 +513,10 @@ std::string pick_open_file(SDL_Window *, const char *, const char *, const char 
 bool zip_folder(const std::string &, const std::string &, int *files_written) { if (files_written) *files_written = 0; return false; }
 const SystemDiag &system_diagnostics() { static SystemDiag d{"Unknown", "Unknown", "Unknown", 0}; return d; }
 std::vector<DriveInfo> list_drives() { return {}; }
+bool system_volume_get(int *, bool *) { return false; }
+bool system_volume_set(int, bool) { return false; }
+void gamebar_override_set(bool) {}
+bool is_steam_running() { return false; }
 #endif
 
 }  // namespace sanctum

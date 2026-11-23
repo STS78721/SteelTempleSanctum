@@ -26,6 +26,7 @@
 
 #include "app.h"
 #include "avatars.h"
+#include "cache.h"
 #include "catalog.h"
 #include "config.h"
 #include "covers.h"
@@ -39,6 +40,9 @@
 #include "json.h"
 #include "launch.h"
 #include "mods.h"
+#include "overlay.h"
+#include "perf.h"
+#include "platform.h"
 #include "selfupdate.h"
 #include "sound.h"
 #include "stb_image.h"   // implemented in covers.cpp
@@ -125,12 +129,21 @@ bool hover(float x, float y, float w, float h) {
     return m.x >= x && m.x < x + w && m.y >= y && m.y < y + h;
 }
 
+static bool sanctum_in_background(SDL_Window *win) {
+    SDL_WindowFlags fl = SDL_GetWindowFlags(win);
+    return (fl & SDL_WINDOW_MINIMIZED) != 0 || (fl & SDL_WINDOW_INPUT_FOCUS) == 0;
+}
+
 // what the workers finished, taken in every frame, and while a game runs too
 static void background_poll(SDL_Window *win) {
     if (game_running() && input_poll_force_close(g_app.now)) {
         sanctum_log("force-close: controller chord held 2 s");
-        close_game();
+        overlay_close();
+        close_game(true);
         toast("Force-closed game via controller chord", 3.5);
+    }
+    if (game_running() && !launch_starting() && sanctum_in_background(win) && input_poll_guide_press(g_app.now)) {
+        overlay_open_from_game(win);
     }
     launch_poll(win);
     install_poll(win);
@@ -289,6 +302,7 @@ int main(int, char **) {
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;   // Sanctum owns cursor visibility (prevents ImGui re-showing it)
     std::string font = std::string(SDL_GetBasePath()) + "assets\\fonts\\Roboto-Medium.ttf";
     ImFontConfig fc;
     fc.OversampleH = 2;
@@ -301,6 +315,8 @@ int main(int, char **) {
     ImGui_ImplSDL3_InitForSDLRenderer(win, ren);
     ImGui_ImplSDLRenderer3_Init(ren);
 
+    cache_init();
+    catalog_load_cached();
     library_load();
     playtime_load();
     github_load_saved();
@@ -311,6 +327,12 @@ int main(int, char **) {
     avatars_init(ren);
     album_init(ren);
     discord_rpc_init();
+    if (!demo_mode() && !getenv("SANCTUM_SHOT") && cfg().guide_overlay && cfg().guide_override_gamebar) {
+        gamebar_override_set(true);
+        atexit([] { gamebar_override_set(false); });
+    }
+    perf_sync_idle();
+    atexit([] { perf_on_shutdown(); });
     self_update_start();   // Sanctum's own releases: a newer one downloads in the background
     whatsnew_check();
 
@@ -329,26 +351,37 @@ int main(int, char **) {
     if (!cfg().display_name.empty() && !getenv("SANCTUM_WINDOWED")) apply_display(cfg().display_name);
     if (cfg().fullscreen && !getenv("SANCTUM_WINDOWED")) SDL_SetWindowFullscreen(win, true);
     SDL_ShowWindow(win);
+    if (cfg().hide_cursor) SDL_HideCursor();
     Uint64 t0 = SDL_GetTicksNS(), last = t0;
     float dim_alpha = 0.0f;
     bool was_dimmed = false;
 
     for (int frame = 0; !a.quit; ++frame) {
-        // while a game runs Sanctum sleeps: no drawing, a glance at the game four times a second
+        // while a game runs Sanctum sleeps: no drawing, responsive polling for Guide overlay & force-close chord
         if (game_running() && (SDL_GetWindowFlags(win) & SDL_WINDOW_MINIMIZED)) {
             SDL_Event e;
-            if (SDL_WaitEventTimeout(&e, 250)) {
-                if (e.type == SDL_EVENT_QUIT) a.quit = true;
-                ImGui_ImplSDL3_ProcessEvent(&e);
+            auto handle_bg_event = [&](const SDL_Event &ev) {
+                if (ev.type == SDL_EVENT_QUIT) a.quit = true;
+                else input_bg_event(ev, a.now);
+                ImGui_ImplSDL3_ProcessEvent(&ev);
+            };
+            if (SDL_WaitEventTimeout(&e, 25)) {
+                a.now = (SDL_GetTicksNS() - t0) / 1e9;
+                handle_bg_event(e);
+                // Drain remaining queued events (e.g. high-rate stick/gyro events) while still latching Guide presses
+                while (SDL_PollEvent(&e)) handle_bg_event(e);
+            } else {
+                a.now = (SDL_GetTicksNS() - t0) / 1e9;
             }
-            a.now = (SDL_GetTicksNS() - t0) / 1e9;
-            background_poll(win);   // downloads, the search, GitHub, and force-close chord go on while the game runs
+            background_poll(win);   // downloads, search, GitHub, Guide overlay wakeup, and force-close chord
             last = SDL_GetTicksNS();
             continue;
         }
         a.mouse_moved = a.clicked = false;
         a.typed.clear();
         a.key_back = a.key_enter = a.key_escape = false;
+        bool bg_game = game_running() && !launch_starting() && sanctum_in_background(win);
+        a.now = (SDL_GetTicksNS() - t0) / 1e9;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL3_ProcessEvent(&e);
@@ -360,6 +393,12 @@ int main(int, char **) {
             if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat &&
                 (e.key.key == SDLK_F11 || (e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT)))) {
                 set_fullscreen(!(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
+                continue;
+            }
+            if (bg_game && (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+                            e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION || e.type == SDL_EVENT_GAMEPAD_ADDED ||
+                            e.type == SDL_EVENT_GAMEPAD_REMOVED)) {
+                input_bg_event(e, a.now);
                 continue;
             }
             input_event(e);
@@ -392,15 +431,26 @@ int main(int, char **) {
         }
 
         if (a.nav == NAV_HOME && a.text_entry) { a.text_entry = false; SDL_StopTextInput(win); }
-        if (a.nav == NAV_HOME) {
-            if (a.screen != SCR_HOME) {
-                sound_play(SFX_HOME);
-                a.trans_t = a.now;
-                a.trans_dir = -1;
+        if (a.nav == NAV_HOME && !launch_starting()) {
+            if (cfg().guide_overlay) {
+                overlay_toggle(win);
+            } else {
+                if (a.screen != SCR_HOME) {
+                    sound_play(SFX_HOME);
+                    a.trans_t = a.now;
+                    a.trans_dir = -1;
+                }
+                a.back.clear();
+                a.screen = SCR_HOME;
             }
-            a.back.clear();
-            a.screen = SCR_HOME;
             a.nav = NAV_NONE;
+        }
+        // Hold screen input while the Quick Overlay drawer is open
+        Nav ov_nav = NAV_NONE;
+        bool ov_click = false;
+        if (overlay_is_open()) {
+            ov_nav = a.nav, ov_click = a.clicked;
+            a.nav = NAV_NONE, a.clicked = false;
         }
         background_poll(win);
         covers_poll(a.now);
@@ -452,11 +502,12 @@ int main(int, char **) {
         if (starting) {
             const Palette &p = pal();
             int pi = running_port();
-            if (start_nav == NAV_B) { sound_play(SFX_BACK); close_game(); toast("Start cancelled"); }
+            if (start_nav == NAV_B) { sound_play(SFX_BACK); close_game(true); toast("Start cancelled"); }
             if (pi >= 0) {
                 const Port &port = ports()[pi];
-                float in = SDL_min(1.0f, (float)running_seconds() * 4);
-                dl()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, with_alpha(mix(p.bg, port.colours.deep, 0.5f), (int)(255 * in)));
+                float in = SDL_min(1.0f, (float)running_seconds() * 8.0f);
+                float bg_a = 0.80f + 0.20f * in;
+                dl()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, with_alpha(mix(p.bg, port.colours.deep, 0.5f), (int)(255 * bg_a)));
                 tile(port, 640 - 130, 150, 260, in, false);
                 text(640, 438, 28, with_alpha(p.text, (int)(255 * in)), fit(28, port.title, 1000).c_str(), 0.5f);
                 float tt = (float)a.now * 5;
@@ -532,6 +583,7 @@ int main(int, char **) {
             text(ox, oy + 112, 14, IM_COL32(130, 136, 148, fg_a), "Press any button to wake", 0.5f);
         }
 
+        overlay_frame(ov_nav, ov_click);
         toast_draw();
 
         ImGui::Render();
@@ -550,6 +602,11 @@ int main(int, char **) {
     }
 
     // a downloaded update goes in now, for the next start (a restart from About has put it in already)
+    launch_on_shutdown();
+    perf_on_shutdown();
+    gamebar_override_set(false);
+    cancel_prepare_shaders();
+    cache_flush();
     if (self_update_state() == UPD_READY) self_update_apply(false);
     discord_rpc_shutdown();
     sound_shutdown();

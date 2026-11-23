@@ -6,6 +6,7 @@
 #include <set>
 #include <vector>
 
+#include "cache.h"
 #include "catalog.h"
 #include "config.h"
 
@@ -37,6 +38,7 @@ static std::string g_watch_sig;               // the folder's pictures (names, s
 static double g_watch_next = 0;
 
 bool load_image_rgba(const std::string &path, int max_dim, int &w_out, int &h_out, std::vector<unsigned char> &rgba_out) {
+    if (max_dim > 0 && cache_thumb_load(path, max_dim, w_out, h_out, rgba_out)) return true;
     int w = 0, h = 0, n = 0;
     unsigned char *px = stbi_load(path.c_str(), &w, &h, &n, 4);
     if (!px || w <= 0 || h <= 0) {
@@ -65,6 +67,7 @@ bool load_image_rgba(const std::string &path, int max_dim, int &w_out, int &h_ou
                 }
     }
     stbi_image_free(px);
+    if (max_dim > 0) cache_thumb_save(path, max_dim, w_out, h_out, rgba_out);
     return true;
 }
 
@@ -260,9 +263,9 @@ void covers_poll(double now) {
             else ++it;
         }
     }
-    // watch the folder: new or changed pictures appear on their own, every two seconds at most
+    // watch the folder: new or changed pictures appear on their own, every 8 seconds (low UI-thread I/O)
     if (now >= g_watch_next && !g_running && !cfg().cover_dir.empty()) {
-        g_watch_next = now + 2.0;
+        g_watch_next = now + 8.0;
         if (signature(cfg().cover_dir) != g_watch_sig) covers_reload();
     }
 }

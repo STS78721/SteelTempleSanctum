@@ -8,6 +8,7 @@
 #include "covers.h"
 #include "input.h"
 #include "install.h"
+#include "launch.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -260,12 +261,41 @@ void status_bar(bool show_profile) {
         icon(IC_PAD, x + 8, 45, 18, p.soft);
     }
 
+    // a running or Quick-Suspended game: visible from every screen so Quick Resume is always clear
+    if (game_running() && running_port() >= 0 && running_port() < (int)ports().size()) {
+        const Port &gp = ports()[running_port()];
+        bool susp = game_suspended();
+        char s[96];
+        SDL_snprintf(s, sizeof s, susp ? "%s  ·  Suspended" : "%s  ·  Playing", gp.name);
+        x -= 24;
+        float w = text_w(16, s);
+        text(x - w, 35, 16, susp ? p.warn : p.ok, s);
+        icon(susp ? IC_PAUSE : IC_PLAY, x - w - 16, 45, 14, susp ? p.warn : p.ok);
+        x -= w + 28;
+    }
+    // a shader pre-warm running in the background: show live progress across all screens
+    if (WarmState ws = shader_warm_state(); ws.active && ws.port >= 0 && ws.port < (int)ports().size()) {
+        char s[96];
+        if (ws.total > 0)
+            SDL_snprintf(s, sizeof s, "%s  shaders %d%%", ports()[ws.port].name, (int)std::min(100LL, ws.done * 100 / ws.total));
+        else
+            SDL_snprintf(s, sizeof s, "%s  shaders", ports()[ws.port].name);
+        x -= 24;
+        float w = text_w(16, s);
+        text(x - w, 35, 16, p.soft, s);
+        float a = (float)app().now * 6;
+        for (int i = 0; i < 8; ++i)
+            circle(x - w - 20 + std::cos(a + i * 0.785f) * 7, 45 + std::sin(a + i * 0.785f) * 7, 1.7f,
+                   with_alpha(ports()[ws.port].colours.accent, 40 + i * 26));
+        x -= w + 30;
+    }
     // a download running: its port and percent, so it is visible from every screen
     for (auto &j : install_jobs()) {
-        if (j.phase != PH_DOWNLOAD && j.phase != PH_VERIFY && j.phase != PH_INSTALL) continue;
+        if (j.phase != PH_DOWNLOAD && j.phase != PH_VERIFY && j.phase != PH_INSTALL && j.phase != PH_RELINK) continue;
         char s[96];
         int pc = j.total ? (int)(100.0 * j.done / j.total) : 0;
-        SDL_snprintf(s, sizeof s, j.phase == PH_DOWNLOAD ? "%s  %d%%" : "%s  installing", ports()[j.port].name, pc);
+        const char *fmt = j.phase == PH_DOWNLOAD ? "%s  %d%%" : j.phase == PH_RELINK ? "%s  relinking" : "%s  installing";
+        SDL_snprintf(s, sizeof s, fmt, ports()[j.port].name, pc);
         x -= 24;
         float w = text_w(16, s);
         text(x - w, 35, 16, p.soft, s);
@@ -389,15 +419,26 @@ void tile(const Port &p, float x, float y, float sz, float alpha, bool badges, f
         circle(pcx, pcy, pr, IM_COL32(0, 0, 0, (int)(175 * alpha)));
         icon(IC_PIN, pcx, pcy, pr * 1.1f, with_alpha(IM_COL32_WHITE, a));
     }
-    // downloading or installing: a bar across the bottom of the tile
+    // running or Quick-Suspended game badge on Home tiles
     int idx = (int)(&p - &ports()[0]);
+    if (running_port() == idx) {
+        bool susp = game_suspended();
+        const char *lbl = susp ? "Suspended" : "Playing";
+        float bw = text_w(sz * 0.068f, lbl) + sz * 0.2f, bh = sz * 0.14f;
+        float bx = x + sz - bw - sz * 0.045f, by = y + sz - bh - sz * 0.045f;
+        rect(bx, by, bw, bh, IM_COL32(0, 0, 0, (int)(205 * alpha)), bh / 2);
+        icon(susp ? IC_PAUSE : IC_PLAY, bx + bh * 0.55f, by + bh / 2, bh * 0.48f, with_alpha(susp ? pl.warn : pl.ok, a));
+        text(bx + bh, by + bh * 0.2f, sz * 0.068f, with_alpha(IM_COL32_WHITE, a), lbl);
+        return;
+    }
+    // downloading or installing: a bar across the bottom of the tile
     for (auto &j : install_jobs()) {
         if (j.port != idx || j.phase >= PH_DONE) continue;
         float bh = sz * 0.16f, by = y + sz - bh;
         dl()->AddRectFilled(P(x, by), P(x + sz, y + sz), IM_COL32(0, 0, 0, (int)(190 * alpha)), S(r), ImDrawFlags_RoundCornersBottom);
         float f = j.phase == PH_DOWNLOAD && j.total ? (float)j.done / j.total : -1;
         progress_bar(x + sz * 0.07f, by + bh * 0.62f, sz * 0.86f, bh * 0.16f, f, p.colours.accent);
-        const char *w = j.phase == PH_QUEUED ? "Waiting" : j.phase == PH_DOWNLOAD ? "Downloading" : j.phase == PH_VERIFY ? "Checking" : "Installing";
+        const char *w = j.phase == PH_QUEUED ? "Waiting" : j.phase == PH_DOWNLOAD ? "Downloading" : j.phase == PH_VERIFY ? "Checking" : j.phase == PH_RELINK ? "Relinking" : "Installing";
         text(x + sz * 0.07f, by + bh * 0.12f, sz * 0.06f, with_alpha(IM_COL32_WHITE, a), w);
         return;
     }

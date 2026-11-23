@@ -58,6 +58,8 @@ struct Port {
     const char *uninstall_key;// HKCU ...\Uninstall\<key> written by its Setup Wizard, or nullptr
     PortColours colours;
     bool custom = false;      // user-added PC game/port shortcut (custom_games.ini)
+    std::string settings_url; // optional remote settings JSON URL (from dynamic catalog.json)
+    std::string log_rel;      // optional relative log path override (from dynamic catalog.json)
 
     std::vector<Install> all;        // every copy found, best first
     std::vector<Install> installs;   // the ones shown (build folders only when Settings asks), best first
@@ -71,8 +73,11 @@ struct Port {
 };
 
 std::vector<Port> &ports();
-int builtin_port_count();   // built-in SteelTemple ports (0..N-1); custom games sit at >= N
+int builtin_port_count();   // built-in + remote-catalog SteelTemple ports (0..N-1); custom games sit at >= N
+int port_index_by_id(const std::string &id);   // -1 if not found
 
+void catalog_load_cached();                    // load cached dynamic catalog.json before library_load()
+int catalog_merge_json(const std::string &json_text);  // merge remote catalog.json on UI thread; returns new ports added
 void library_load();      // the cached list, instantly
 void scan_start();        // the search, on a worker thread
 bool scan_running();

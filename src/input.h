@@ -33,4 +33,13 @@ bool input_pad_battery(int *pct_out, bool *charging_out);
 // While a game is running: checks if Back+Start+L+R are held for 2.0 s to force-close a hung game
 bool input_poll_force_close(double now);
 
+// While a game is running (Sanctum minimized or unfocused): event capture & rising-edge detection for Guide / PS / Home
+void input_bg_event(const SDL_Event &e, double now);
+bool input_poll_guide_press(double now);
+void input_suppress_guide(double now);
+
+// Waits briefly until held controller buttons / triggers / confirm keys are released before handing focus back to a game,
+// so the A / B / Guide press that triggered Resume / Quick Resume never bleeds into the game.
+void input_wait_buttons_released(int max_ms = 650);
+
 }  // namespace sanctum
