@@ -148,6 +148,23 @@
       "deep": "#0A1124",
       "log": "logs\\orbitals.log",
       "settings_url": "https://raw.githubusercontent.com/STS78721/SteelTempleSanctum/main/assets/settings/orbit.json"
+    },
+    {
+      "id": "sunhound",
+      "title": "Star Fox",
+      "name": "SUNHOUND",
+      "repo": "STS78721/SUNHOUND",
+      "known_tag": "0.1.0",
+      "known_size": "156 MB",
+      "cover_key": "starfox",
+      "mono": "SF",
+      "exe": "starfox.exe",
+      "launcher": "StarFoxLauncher.exe",
+      "uninstall_key": "StarFox",
+      "accent": "#00E5A0",
+      "deep": "#050B14",
+      "log": "logs\\starfox.log",
+      "settings_url": "https://raw.githubusercontent.com/STS78721/SteelTempleSanctum/main/assets/settings/sunhound.json"
     }
   ]
 }
