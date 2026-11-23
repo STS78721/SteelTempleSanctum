@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "app.h"
+#include "config.h"
 #include "input.h"
 
 namespace sanctum {
@@ -20,7 +21,10 @@ static constexpr int kMaxVoices = 16;
 
 struct Voice {
     int sfx = 0;
-    size_t pos = 0;   // in stereo frames
+    double pos = 0.0;     // fractional stereo frame index
+    double rate = 1.0;    // pitch ratio (1.0 = normal)
+    float pan_l = 1.0f;   // left channel scale
+    float pan_r = 1.0f;   // right channel scale
     bool active = false;
 };
 
@@ -34,11 +38,14 @@ static float g_bgm_env = 0.0f;           // smooth fade envelope 0..1
 
 static Voice g_voices[kMaxVoices];
 static Sint64 g_last_ms[SFX_COUNT];
+static Sint64 g_last_move_ms = -1000;
+static int g_move_step = 0;
 static std::mutex g_lock;
 static SDL_AudioStream *g_stream = nullptr;
 static bool g_audio_subsys = false;
 static bool g_enabled = true;
 static bool g_paused = false;
+static Uint64 g_oneshot_until = 0;
 static float g_gain = 0.65f;
 static int g_theme = 0;
 
@@ -119,6 +126,51 @@ static void add_tap(std::vector<float> &buf, float start_ms, float dur_ms, float
     }
 }
 
+// Crisp mechanical-wood/acrylic micro-click: ultra-short high-Q resonant burst + sub-ms tactile snap
+static void add_click(std::vector<float> &buf, float start_ms, float freq_hz, float tau_ms, float amp, float pan = 0.0f) {
+    size_t total = buf.size() / 2;
+    size_t s0 = (size_t)std::max(0.0f, start_ms * 0.001f * kSampleRate);
+    size_t n = (size_t)std::max(8.0f, (tau_ms * 5.5f + 2.0f) * 0.001f * kSampleRate);
+    float angle = (SDL_clamp(pan, -1.0f, 1.0f) + 1.0f) * 0.25f * kPi;
+    float lg = std::cos(angle) * 1.41421356f;
+    float rg = std::sin(angle) * 1.41421356f;
+
+    // 2-pole resonant bandpass excited by a razor-short 0.25 ms woody impulse + tiny pitched snap
+    float w0 = 2.0f * kPi * SDL_clamp(freq_hz, 400.0f, 9500.0f) / (float)kSampleRate;
+    float r = std::exp(-1.0f / std::max(1.0f, tau_ms * 0.001f * kSampleRate));
+    float a1 = -2.0f * r * std::cos(w0);
+    float a2 = r * r;
+    float y1 = 0.0f, y2 = 0.0f;
+    uint32_t rng = 0x51A7F3C9u ^ (uint32_t)(freq_hz * 17.0f);
+    size_t burst = std::max<size_t>(3, (size_t)(0.00032f * kSampleRate));
+    double snap_ph = 0.0;
+
+    for (size_t i = 0; i < n && s0 + i < total; ++i) {
+        float x = 0.0f;
+        if (i == 0) x = 1.0f;
+        else if (i < burst) {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            float wn = ((float)(rng & 0xFFFFu) / 32768.0f) - 1.0f;
+            x = wn * 0.55f * (1.0f - (float)i / (float)burst);
+        }
+        float y = (1.0f - r) * x - a1 * y1 - a2 * y2;
+        y2 = y1;
+        y1 = y;
+
+        // Add subtle physical switch-body knock (rapid downward drop in first 2.5 ms)
+        float t_ms = (float)i * 1000.0f / (float)kSampleRate;
+        float snap_f = (freq_hz * 0.28f) + (freq_hz * 0.52f) * std::exp(-t_ms / 0.85f);
+        float snap_env = std::exp(-t_ms / std::max(0.7f, tau_ms * 0.65f));
+        float snap = 0.34f * snap_env * (float)std::sin(snap_ph);
+        snap_ph += 2.0 * (double)kPi * (double)snap_f / (double)kSampleRate;
+
+        float env_in = i < 4 ? (float)(i + 1) / 4.0f : 1.0f;
+        float sample = amp * env_in * (y * 1.9f + snap);
+        buf[(s0 + i) * 2 + 0] += sample * lg;
+        buf[(s0 + i) * 2 + 1] += sample * rg;
+    }
+}
+
 static void finish_buf(std::vector<float> &buf) {
     size_t frames = buf.size() / 2;
     size_t tail = std::min(frames, (size_t)(0.002f * kSampleRate));
@@ -131,93 +183,162 @@ static void finish_buf(std::vector<float> &buf) {
 }
 
 static void build_sfx(int theme) {
-    // Theme multipliers: 0 Switch 2 Crisp, 1 Warm Retro (lower pitch, fuller harmonics), 2 Soft Minimal (airy sine)
-    float pm = theme == 1 ? 0.78f : theme == 2 ? 1.12f : 1.0f;
-    float hm = theme == 1 ? 1.55f : theme == 2 ? 0.25f : 1.0f;
-    float tm = theme == 1 ? 1.25f : theme == 2 ? 0.88f : 1.0f;
-    float am = theme == 2 ? 0.72f : 1.0f;
-    float tapm = theme == 1 ? 0.7f : theme == 2 ? 0.2f : 1.0f;
+    // Profiles:
+    //   0 = Tactile Click (crisp mechanical micro-clicks + tight woody-glass pops)
+    //   1 = Bubble Pop    (playful rising aquatic/marimba bubbly blips)
+    //   2 = Warm Retro    (lower pitch, fuller woody harmonics)
+    //   3 = Soft Minimal  (airy pure sine ticks, whisper-light transient)
+    bool is_clicky = (theme == 0);
+    bool is_bubbly = (theme == 1);
+    float pm = theme == 2 ? 0.78f : theme == 3 ? 1.12f : 1.0f;
+    float hm = theme == 2 ? 1.55f : theme == 3 ? 0.25f : is_bubbly ? 0.65f : 0.95f;
+    float tm = theme == 2 ? 1.25f : theme == 3 ? 0.88f : is_clicky ? 0.84f : 1.05f;
+    float am = theme == 3 ? 0.72f : 1.0f;
+    float clkm = is_clicky ? 1.0f : is_bubbly ? 0.28f : theme == 2 ? 0.62f : 0.14f;
+    float tapm = is_clicky ? 1.0f : is_bubbly ? 0.35f : theme == 2 ? 0.70f : 0.18f;
 
     auto tone = [&](std::vector<float> &b, float s, float d, float f0, float f1, float gl, float tau, float amp,
                     float h2, float h3, float pan = 0.0f) {
         add_tone(b, s, d, f0 * pm, f1 * pm, gl, tau * tm, amp * am, h2 * hm, h3 * hm, pan);
     };
+    auto click = [&](std::vector<float> &b, float s, float fhz, float tau, float amp, float pan = 0.0f) {
+        if (clkm > 0.01f) add_click(b, s, fhz * pm, tau, amp * clkm * am, pan);
+    };
 
+    // ---- SFX_MOVE: signature menu navigation sound
     {
-        auto &b = g_bufs[SFX_MOVE] = make_buf(36);
-        tone(b, 0, 36, 920.0f, 680.0f, 9.0f, 8.5f, 0.34f, 0.20f, 0.06f);
-        add_tap(b, 0, 3.5f, 0.05f * tapm, 2400.0f);
-        finish_buf(b);
+        if (is_clicky) {
+            auto &b = g_bufs[SFX_MOVE] = make_buf(32);
+            // Crisp mechanical-acrylic micro-click + tight woody glass tick
+            click(b, 0.0f, 3550.0f, 1.35f, 0.34f);
+            add_tap(b, 0.0f, 3.2f, 0.14f, 4200.0f);
+            tone(b, 0.6f, 28.0f, 1180.0f, 840.0f, 5.5f, 6.2f, 0.27f, 0.18f, 0.05f);
+            finish_buf(b);
+        } else if (is_bubbly) {
+            auto &b = g_bufs[SFX_MOVE] = make_buf(44);
+            // Playful upward water-bubble blip
+            tone(b, 0.0f, 44.0f, 460.0f, 940.0f, 11.0f, 11.5f, 0.34f, 0.10f, 0.02f);
+            click(b, 0.0f, 2200.0f, 1.0f, 0.12f);
+            finish_buf(b);
+        } else {
+            auto &b = g_bufs[SFX_MOVE] = make_buf(36);
+            tone(b, 0, 36, 920.0f, 680.0f, 9.0f, 8.5f, 0.32f, 0.20f, 0.06f);
+            click(b, 0.0f, 2600.0f, 1.2f, 0.18f);
+            finish_buf(b);
+        }
     }
+    // ---- SFX_EDGE: soft muted rubbery wood bump
     {
         auto &b = g_bufs[SFX_EDGE] = make_buf(48);
-        tone(b, 0, 48, 220.0f, 145.0f, 12.0f, 12.0f, 0.24f, 0.14f, 0.0f);
+        click(b, 0.0f, 1150.0f, 1.6f, 0.22f);
+        tone(b, 0.0f, 48.0f, 235.0f, 140.0f, 10.0f, 11.5f, 0.26f, 0.12f, 0.0f);
         finish_buf(b);
     }
+    // ---- SFX_OK: crisp tactile click + bright ascending glassy-marimba chime
     {
-        auto &b = g_bufs[SFX_OK] = make_buf(105);
-        tone(b, 0, 56, 784.0f, 830.0f, 10.0f, 16.0f, 0.28f, 0.16f, 0.0f);
-        add_tap(b, 0, 3.0f, 0.04f * tapm, 2600.0f);
-        tone(b, 24, 81, 1174.66f, 1174.66f, 0.0f, 26.0f, 0.34f, 0.12f, 0.04f, 0.06f);
+        auto &b = g_bufs[SFX_OK] = make_buf(112);
+        click(b, 0.0f, 3800.0f, 1.4f, 0.32f, -0.04f);
+        add_tap(b, 0.0f, 3.0f, 0.11f * tapm, 3800.0f);
+        if (is_bubbly) {
+            tone(b, 0.0f, 52.0f, 587.33f, 783.99f, 9.0f, 14.0f, 0.28f, 0.10f, 0.0f, -0.05f);
+            tone(b, 22.0f, 90.0f, 880.0f, 1174.66f, 10.0f, 24.0f, 0.34f, 0.08f, 0.03f, 0.06f);
+        } else {
+            tone(b, 0.5f, 52.0f, 783.99f, 830.61f, 7.0f, 13.0f, 0.26f, 0.14f, 0.03f, -0.04f);
+            click(b, 20.0f, 4400.0f, 1.1f, 0.18f, 0.05f);
+            tone(b, 20.5f, 90.0f, 1174.66f, 1174.66f, 0.0f, 24.0f, 0.33f, 0.11f, 0.04f, 0.06f);
+            tone(b, 21.0f, 68.0f, 1760.0f, 1760.0f, 0.0f, 14.0f, 0.08f, 0.0f, 0.0f, 0.08f);
+        }
         finish_buf(b);
     }
+    // ---- SFX_BACK: soft reverse woody click + smooth descending fifth
     {
-        auto &b = g_bufs[SFX_BACK] = make_buf(95);
-        tone(b, 0, 50, 659.25f, 659.25f, 0.0f, 15.0f, 0.25f, 0.10f, 0.0f);
-        tone(b, 22, 73, 440.00f, 440.00f, 0.0f, 24.0f, 0.28f, 0.08f, 0.0f, -0.05f);
+        auto &b = g_bufs[SFX_BACK] = make_buf(96);
+        click(b, 0.0f, 2450.0f, 1.3f, 0.25f, 0.04f);
+        tone(b, 0.5f, 46.0f, 740.0f, 659.25f, 9.0f, 13.0f, 0.24f, 0.10f, 0.0f, 0.04f);
+        click(b, 20.0f, 1850.0f, 1.2f, 0.16f, -0.05f);
+        tone(b, 20.5f, 75.0f, 493.88f, 440.00f, 12.0f, 22.0f, 0.27f, 0.08f, 0.0f, -0.06f);
         finish_buf(b);
     }
+    // ---- SFX_TAB: breezy crisp card-flip snap
     {
-        auto &b = g_bufs[SFX_TAB] = make_buf(65);
-        add_tap(b, 0, 6.0f, 0.05f * tapm, 3200.0f);
-        tone(b, 0, 65, 987.77f, 1318.51f, 14.0f, 16.0f, 0.26f, 0.14f, 0.05f);
+        auto &b = g_bufs[SFX_TAB] = make_buf(68);
+        click(b, 0.0f, 4300.0f, 1.2f, 0.30f);
+        add_tap(b, 0.0f, 5.0f, 0.13f * tapm, 4100.0f);
+        tone(b, 0.5f, 66.0f, 987.77f, 1318.51f, 12.0f, 15.0f, 0.25f, 0.12f, 0.04f);
         finish_buf(b);
     }
+    // ---- SFX_TOGGLE_ON: crisp tactile switch snap ON + bright upward ping
     {
-        auto &b = g_bufs[SFX_TOGGLE_ON] = make_buf(95);
-        tone(b, 0, 48, 698.46f, 698.46f, 0.0f, 13.0f, 0.25f, 0.12f, 0.0f);
-        tone(b, 26, 69, 1046.50f, 1046.50f, 0.0f, 24.0f, 0.32f, 0.12f, 0.05f);
+        auto &b = g_bufs[SFX_TOGGLE_ON] = make_buf(98);
+        click(b, 0.0f, 3950.0f, 1.2f, 0.32f, -0.04f);
+        tone(b, 0.5f, 44.0f, 698.46f, 740.0f, 7.0f, 12.0f, 0.24f, 0.12f, 0.0f, -0.04f);
+        click(b, 24.0f, 4600.0f, 1.1f, 0.20f, 0.05f);
+        tone(b, 24.5f, 72.0f, 1046.50f, 1046.50f, 0.0f, 22.0f, 0.31f, 0.12f, 0.05f, 0.05f);
         finish_buf(b);
     }
+    // ---- SFX_TOGGLE_OFF: crisp tactile switch release OFF
     {
-        auto &b = g_bufs[SFX_TOGGLE_OFF] = make_buf(85);
-        tone(b, 0, 45, 698.46f, 698.46f, 0.0f, 12.0f, 0.23f, 0.08f, 0.0f);
-        tone(b, 24, 61, 523.25f, 523.25f, 0.0f, 20.0f, 0.24f, 0.06f, 0.0f);
+        auto &b = g_bufs[SFX_TOGGLE_OFF] = make_buf(86);
+        click(b, 0.0f, 2700.0f, 1.2f, 0.26f, 0.04f);
+        tone(b, 0.5f, 42.0f, 698.46f, 659.25f, 8.0f, 11.0f, 0.22f, 0.08f, 0.0f, 0.04f);
+        click(b, 22.0f, 1950.0f, 1.2f, 0.18f, -0.04f);
+        tone(b, 22.5f, 62.0f, 523.25f, 493.88f, 10.0f, 18.0f, 0.23f, 0.06f, 0.0f, -0.04f);
         finish_buf(b);
     }
+    // ---- SFX_KEY: ultra-light keycap / slider tick
     {
-        auto &b = g_bufs[SFX_KEY] = make_buf(26);
-        tone(b, 0, 26, 1180.0f, 900.0f, 6.0f, 6.0f, 0.24f, 0.12f, 0.0f);
-        add_tap(b, 0, 3.0f, 0.04f * tapm, 2800.0f);
+        auto &b = g_bufs[SFX_KEY] = make_buf(24);
+        click(b, 0.0f, 4500.0f, 1.0f, 0.28f);
+        tone(b, 0.4f, 22.0f, 1320.0f, 960.0f, 4.5f, 5.0f, 0.21f, 0.10f, 0.0f);
         finish_buf(b);
     }
+    // ---- SFX_HOME: crisp magnetic latch click + luminous 3-note console chord
     {
-        auto &b = g_bufs[SFX_HOME] = make_buf(195);
-        tone(b, 0, 160, 523.25f, 523.25f, 0.0f, 45.0f, 0.22f, 0.08f, 0.0f, -0.14f);
-        tone(b, 28, 165, 783.99f, 783.99f, 0.0f, 50.0f, 0.24f, 0.08f, 0.0f, 0.0f);
-        tone(b, 56, 139, 1046.50f, 1046.50f, 0.0f, 60.0f, 0.26f, 0.12f, 0.0f, 0.14f);
+        auto &b = g_bufs[SFX_HOME] = make_buf(200);
+        click(b, 0.0f, 3600.0f, 1.4f, 0.30f);
+        tone(b, 1.0f, 165.0f, 523.25f, 523.25f, 0.0f, 45.0f, 0.22f, 0.08f, 0.0f, -0.16f);
+        tone(b, 26.0f, 165.0f, 783.99f, 783.99f, 0.0f, 50.0f, 0.24f, 0.08f, 0.0f, 0.0f);
+        tone(b, 52.0f, 146.0f, 1046.50f, 1046.50f, 0.0f, 60.0f, 0.26f, 0.12f, 0.0f, 0.16f);
+        tone(b, 74.0f, 120.0f, 1567.98f, 1567.98f, 0.0f, 48.0f, 0.09f, 0.04f, 0.0f, 0.08f);
         finish_buf(b);
     }
+    // ---- SFX_LAUNCH: tactile double-click lock-in + sparkling console start fanfare
     {
-        auto &b = g_bufs[SFX_LAUNCH] = make_buf(270);
-        add_tap(b, 0, 4.0f, 0.05f * tapm, 2800.0f);
-        tone(b, 0, 220, 523.25f, 523.25f, 0.0f, 65.0f, 0.22f, 0.08f, 0.0f, -0.16f);
-        tone(b, 24, 220, 659.25f, 659.25f, 0.0f, 70.0f, 0.22f, 0.08f, 0.0f, -0.06f);
-        tone(b, 48, 210, 783.99f, 783.99f, 0.0f, 75.0f, 0.24f, 0.08f, 0.0f, 0.06f);
-        tone(b, 74, 196, 1046.50f, 1046.50f, 0.0f, 85.0f, 0.26f, 0.12f, 0.0f, 0.16f);
-        tone(b, 98, 172, 1567.98f, 1567.98f, 0.0f, 75.0f, 0.12f, 0.05f, 0.0f, 0.0f);
+        auto &b = g_bufs[SFX_LAUNCH] = make_buf(275);
+        click(b, 0.0f, 3850.0f, 1.4f, 0.34f, -0.08f);
+        click(b, 22.0f, 4650.0f, 1.2f, 0.24f, 0.08f);
+        tone(b, 1.0f, 220.0f, 523.25f, 523.25f, 0.0f, 65.0f, 0.22f, 0.08f, 0.0f, -0.18f);
+        tone(b, 24.0f, 220.0f, 659.25f, 659.25f, 0.0f, 70.0f, 0.22f, 0.08f, 0.0f, -0.07f);
+        tone(b, 48.0f, 215.0f, 783.99f, 783.99f, 0.0f, 75.0f, 0.24f, 0.08f, 0.0f, 0.07f);
+        tone(b, 74.0f, 200.0f, 1046.50f, 1046.50f, 0.0f, 85.0f, 0.26f, 0.12f, 0.0f, 0.18f);
+        tone(b, 98.0f, 175.0f, 1567.98f, 1567.98f, 0.0f, 75.0f, 0.13f, 0.05f, 0.0f, 0.0f);
         finish_buf(b);
     }
+    // ---- SFX_ERROR: muted woody double-knock
     {
-        auto &b = g_bufs[SFX_ERROR] = make_buf(125);
-        tone(b, 0, 55, 260.0f, 230.0f, 12.0f, 18.0f, 0.25f, 0.10f, 0.0f);
-        tone(b, 48, 77, 215.0f, 185.0f, 12.0f, 22.0f, 0.23f, 0.08f, 0.0f);
+        auto &b = g_bufs[SFX_ERROR] = make_buf(128);
+        click(b, 0.0f, 1300.0f, 1.6f, 0.24f);
+        tone(b, 0.0f, 55.0f, 260.0f, 220.0f, 12.0f, 17.0f, 0.25f, 0.10f, 0.0f);
+        click(b, 48.0f, 1100.0f, 1.6f, 0.22f);
+        tone(b, 48.0f, 78.0f, 215.0f, 175.0f, 12.0f, 21.0f, 0.23f, 0.08f, 0.0f);
         finish_buf(b);
     }
+    // ---- SFX_NOTIFY: delicate crystalline 2-bell chime
     {
-        auto &b = g_bufs[SFX_NOTIFY] = make_buf(180);
-        tone(b, 0, 120, 880.00f, 880.00f, 0.0f, 35.0f, 0.22f, 0.08f, 0.0f, -0.08f);
-        tone(b, 45, 135, 1318.51f, 1318.51f, 0.0f, 55.0f, 0.25f, 0.10f, 0.04f, 0.08f);
+        auto &b = g_bufs[SFX_NOTIFY] = make_buf(185);
+        click(b, 0.0f, 4200.0f, 1.0f, 0.16f, -0.08f);
+        tone(b, 0.5f, 120.0f, 880.00f, 880.00f, 0.0f, 35.0f, 0.22f, 0.08f, 0.0f, -0.08f);
+        tone(b, 45.0f, 138.0f, 1318.51f, 1318.51f, 0.0f, 55.0f, 0.25f, 0.10f, 0.04f, 0.08f);
+        finish_buf(b);
+    }
+    // ---- SFX_SHUTTER: crisp double-blade camera shutter snap + confirmation ping
+    {
+        auto &b = g_bufs[SFX_SHUTTER] = make_buf(145);
+        add_tap(b, 0, 9.0f, 0.34f, 4400.0f, -0.10f);
+        add_click(b, 0.0f, 4100.0f, 1.4f, 0.28f, -0.10f);
+        tone(b, 0, 22, 1650.0f, 920.0f, 5.0f, 6.0f, 0.20f, 0.14f, 0.0f, -0.08f);
+        add_tap(b, 26, 12.0f, 0.38f, 3400.0f, 0.10f);
+        tone(b, 28, 112, 1760.0f, 1760.0f, 0.0f, 26.0f, 0.22f, 0.10f, 0.04f, 0.08f);
         finish_buf(b);
     }
 }
@@ -307,21 +428,30 @@ static void SDLCALL audio_cb(void *, SDL_AudioStream *stream, int additional_amo
                 g_bgm_env = 0.0f;
             }
 
-            // UI SFX voices
-            float gain = g_enabled && !g_paused ? g_gain : 0.0f;
+            // UI SFX voices (with smooth fractional-rate pitch shift & subtle stereo pan)
+            bool oneshot_active = g_oneshot_until != 0 && SDL_GetTicks() < g_oneshot_until;
+            float gain = g_enabled && (!g_paused || oneshot_active) ? g_gain : 0.0f;
             if (gain > 0.0f) {
                 for (int v = 0; v < kMaxVoices; ++v) {
                     Voice &vc = g_voices[v];
                     if (!vc.active) continue;
                     const std::vector<float> &buf = g_bufs[vc.sfx];
                     size_t total = buf.size() / 2;
-                    size_t avail = vc.pos < total ? std::min((size_t)frames, total - vc.pos) : 0;
-                    for (size_t i = 0; i < avail; ++i) {
-                        mix[i * 2 + 0] += buf[(vc.pos + i) * 2 + 0] * gain;
-                        mix[i * 2 + 1] += buf[(vc.pos + i) * 2 + 1] * gain;
+                    if (total == 0) { vc.active = false; continue; }
+                    float gl = gain * vc.pan_l;
+                    float gr = gain * vc.pan_r;
+                    for (int i = 0; i < frames; ++i) {
+                        size_t idx = (size_t)vc.pos;
+                        if (idx >= total) { vc.active = false; break; }
+                        float frac = (float)(vc.pos - (double)idx);
+                        size_t idx2 = idx + 1 < total ? idx + 1 : idx;
+                        float l = buf[idx * 2 + 0] + (buf[idx2 * 2 + 0] - buf[idx * 2 + 0]) * frac;
+                        float r = buf[idx * 2 + 1] + (buf[idx2 * 2 + 1] - buf[idx * 2 + 1]) * frac;
+                        mix[i * 2 + 0] += l * gl;
+                        mix[i * 2 + 1] += r * gr;
+                        vc.pos += vc.rate;
                     }
-                    vc.pos += avail;
-                    if (vc.pos >= total) vc.active = false;
+                    if ((size_t)vc.pos >= total) vc.active = false;
                 }
             }
         }
@@ -336,7 +466,8 @@ static void update_device_state() {
     if (!g_stream) return;
     SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(g_stream);
     if (!dev) return;
-    bool run = (g_enabled || g_bgm_mode > 0) && !g_paused;
+    bool oneshot = g_oneshot_until != 0 && SDL_GetTicks() < g_oneshot_until;
+    bool run = ((g_enabled || g_bgm_mode > 0) && !g_paused) || (g_enabled && oneshot);
     if (run) {
         SDL_ResumeAudioDevice(dev);
     } else {
@@ -390,9 +521,57 @@ void sound_shutdown() {
     g_bgm_custom.clear();
 }
 
+static void enqueue_voice_locked(Sfx s, double rate, float pan) {
+    if (!g_stream || !g_enabled) return;
+    int slot = -1;
+    double max_pos = -1.0;
+    int oldest = 0;
+    for (int i = 0; i < kMaxVoices; ++i) {
+        if (!g_voices[i].active) { slot = i; break; }
+        if (g_voices[i].pos >= max_pos) { max_pos = g_voices[i].pos; oldest = i; }
+    }
+    if (slot < 0) slot = oldest;
+    float p = SDL_clamp(pan, -0.45f, 0.45f);
+    float ang = (p + 1.0f) * 0.25f * kPi;
+    float pl = std::cos(ang) * 1.41421356f;
+    float pr = std::sin(ang) * 1.41421356f;
+    g_voices[slot] = {s, 0.0, SDL_clamp(rate, 0.72, 1.38), pl, pr, true};
+}
+
+void sound_play_move(int dir, float pan) {
+    bool fire = false;
+    {
+        std::lock_guard<std::mutex> l(g_lock);
+        if (g_paused) return;
+        Sint64 now = (Sint64)SDL_GetTicks();
+        if (now - g_last_ms[SFX_MOVE] < 25) return;
+        g_last_ms[SFX_MOVE] = now;
+        fire = true;
+
+        double rate = 1.0;
+        float use_pan = 0.0f;
+        if (cfg().sound_pitch_pan) {
+            if (now - g_last_move_ms > 420) g_move_step = 0;
+            else if (dir > 0) g_move_step = std::min(5, g_move_step + 1);
+            else if (dir < 0) g_move_step = std::max(-4, g_move_step - 1);
+            else g_move_step = (g_move_step >= 2) ? 0 : g_move_step + 1;
+            g_last_move_ms = now;
+            // Subtle half-semitone musical micro-ladder prevents ear fatigue during rapid scrolling
+            rate = std::pow(2.0, (double)g_move_step * 0.55 / 12.0);
+            use_pan = SDL_clamp(pan, -0.34f, 0.34f);
+        }
+        enqueue_voice_locked(SFX_MOVE, rate, use_pan);
+    }
+    if (fire) input_rumble(HAP_TICK);
+}
+
 void sound_play(Sfx s) {
     if (s < 0 || s >= SFX_COUNT) return;
-    Sint64 cooldown = (s == SFX_MOVE || s == SFX_KEY) ? 25 : (s == SFX_EDGE ? 150 : 20);
+    if (s == SFX_MOVE) {
+        sound_play_move(0, 0.0f);
+        return;
+    }
+    Sint64 cooldown = (s == SFX_KEY) ? 25 : (s == SFX_EDGE ? 150 : 20);
     bool fire = false;
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -401,29 +580,46 @@ void sound_play(Sfx s) {
         if (now - g_last_ms[s] < cooldown) return;
         g_last_ms[s] = now;
         fire = true;
-
-        if (g_stream && g_enabled) {
-            int slot = -1;
-            size_t max_pos = 0;
-            int oldest = 0;
-            for (int i = 0; i < kMaxVoices; ++i) {
-                if (!g_voices[i].active) { slot = i; break; }
-                if (g_voices[i].pos >= max_pos) { max_pos = g_voices[i].pos; oldest = i; }
-            }
-            if (slot < 0) slot = oldest;
-            g_voices[slot] = {s, 0, true};
-        }
+        enqueue_voice_locked(s, 1.0, 0.0f);
     }
     if (fire) {
         Haptic h = HAP_TICK;
         switch (s) {
-        case SFX_OK: case SFX_TOGGLE_ON: case SFX_HOME: case SFX_NOTIFY: h = HAP_OK; break;
+        case SFX_OK: case SFX_TOGGLE_ON: case SFX_HOME: case SFX_NOTIFY: case SFX_SHUTTER: h = HAP_OK; break;
         case SFX_BACK: case SFX_TOGGLE_OFF: h = HAP_BACK; break;
         case SFX_LAUNCH: h = HAP_LAUNCH; break;
         case SFX_ERROR: case SFX_EDGE: h = HAP_ERROR; break;
         default: h = HAP_TICK; break;
         }
         input_rumble(h);
+    }
+}
+
+void sound_play_oneshot(Sfx s) {
+    if (s < 0 || s >= SFX_COUNT) return;
+    bool fire = false;
+    {
+        std::lock_guard<std::mutex> l(g_lock);
+        Sint64 now = (Sint64)SDL_GetTicks();
+        if (now - g_last_ms[s] < 120) return;
+        g_last_ms[s] = now;
+        fire = true;
+        if (g_stream && g_enabled) {
+            if (g_paused) {
+                g_oneshot_until = (Uint64)now + 320;
+                update_device_state();
+            }
+            enqueue_voice_locked(s, 1.0, 0.0f);
+        }
+    }
+    if (fire) input_rumble(HAP_OK, true);
+}
+
+void sound_poll() {
+    std::lock_guard<std::mutex> l(g_lock);
+    if (g_oneshot_until != 0 && SDL_GetTicks() >= g_oneshot_until) {
+        g_oneshot_until = 0;
+        update_device_state();
     }
 }
 
@@ -443,7 +639,7 @@ void sound_set_volume(int level) {
 }
 
 void sound_set_theme(int theme) {
-    int t = SDL_clamp(theme, 0, 2);
+    int t = SDL_clamp(theme, 0, 3);
     std::lock_guard<std::mutex> l(g_lock);
     if (g_theme == t) return;
     g_theme = t;

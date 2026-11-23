@@ -19,6 +19,9 @@ static bool g_guide_down = false;
 static bool g_guide_pending = false;
 static SDL_JoystickID g_guide_hit_id = 0;
 static double g_guide_cooldown_until = 0;
+static bool g_capture_down = false;
+static bool g_capture_pending = false;
+static double g_capture_cooldown_until = 0;
 static double g_last_mouse_input = -10.0;
 static float g_last_mx = -1e9f, g_last_my = -1e9f;
 
@@ -147,6 +150,14 @@ void input_bg_event(const SDL_Event &e, double now) {
         input_event(e);
         return;
     }
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_MISC1) {
+        if (now >= g_capture_cooldown_until && !g_capture_pending) {
+            g_capture_pending = true;
+            g_capture_down = true;
+        }
+    } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP && e.gbutton.button == SDL_GAMEPAD_BUTTON_MISC1) {
+        g_capture_down = false;
+    }
     if (!cfg().guide_overlay) return;
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
         if (now >= g_guide_cooldown_until && !g_guide_pending) {
@@ -156,6 +167,32 @@ void input_bg_event(const SDL_Event &e, double now) {
     } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP && e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
         g_guide_down = false;
     }
+}
+
+bool input_poll_capture_press(double now) {
+    if (g_capture_pending) {
+        g_capture_pending = false;
+        if (now >= g_capture_cooldown_until) {
+            g_capture_cooldown_until = now + 0.90;
+            sanctum_log("input: Capture/Share button latched (via=event)");
+            return true;
+        }
+    }
+    SDL_UpdateGamepads();
+    int cnt = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&cnt);
+    bool down = false;
+    for (int i = 0; ids && i < cnt; ++i) {
+        SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
+        if (g && SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_MISC1)) { down = true; break; }
+    }
+    SDL_free(ids);
+    if (!down) { g_capture_down = false; return false; }
+    if (g_capture_down || now < g_capture_cooldown_until) return false;
+    g_capture_down = true;
+    g_capture_cooldown_until = now + 0.90;
+    sanctum_log("input: Capture/Share button detected (via=poll)");
+    return true;
 }
 
 bool input_poll_guide_press(double now) {
@@ -385,6 +422,9 @@ void input_event(const SDL_Event &e) {
                 press(NAV_HOME);
             }
             break;
+        case SDL_GAMEPAD_BUTTON_MISC1:
+            if (a.now >= g_capture_cooldown_until) g_capture_pending = true;
+            break;
         default: press(face(SDL_GetGamepadFromID(e.gbutton.which), b));
         }
         break;
@@ -442,6 +482,9 @@ void input_event(const SDL_Event &e) {
         case SDLK_F5: case SDLK_EQUALS: press(NAV_PLUS); break;
         case SDLK_MINUS: case SDLK_F1: press(NAV_MINUS); break;
         case SDLK_HOME: press(NAV_HOME); break;
+        case SDLK_F12: case SDLK_PRINTSCREEN:
+            if (a.now >= g_capture_cooldown_until) g_capture_pending = true;
+            break;
         default: break;
         }
         break;

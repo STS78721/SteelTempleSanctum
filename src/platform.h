@@ -12,6 +12,7 @@ struct SystemDiag {
     std::string os;
     std::string cpu;
     std::string gpu;
+    std::string gpu_driver;
     int ram_gb = 0;
 };
 
@@ -47,6 +48,29 @@ std::vector<DriveInfo> list_drives();
 // Windows default playback endpoint master volume (0..100) and mute state (for the Quick Overlay slider).
 bool system_volume_get(int *pct_out, bool *muted_out);
 bool system_volume_set(int pct, bool mute);
+
+// Active Windows audio playback devices and live default output switcher (for the Quick Overlay).
+struct AudioOutput {
+    std::string id;
+    std::string name;
+    bool active = false;
+};
+std::vector<AudioOutput> system_audio_outputs();
+bool system_audio_output_set(const std::string &device_id);
+
+// Captures a visible window (or the primary monitor if target_hwnd is null) into a PNG file via Windows Imaging Component.
+// allow_print_window must be false if target_hwnd belongs to a suspended/frozen process (PrintWindow sends synchronous WM_PRINT).
+bool capture_screenshot_png(void *target_hwnd, const std::string &dst_png, int *w_out = nullptr, int *h_out = nullptr,
+                            bool allow_print_window = true);
+
+// Monitor bounds (physical screen coords) for a given Win32 HWND (or primary monitor if null).
+bool monitor_rect_for_hwnd(void *target_hwnd, int &x, int &y, int &w, int &h);
+
+// Reversible per-game display refresh rate switching (session-only, never modifies registry defaults).
+std::vector<int> display_supported_refresh_rates(void *hwnd_opt = nullptr);
+int display_current_refresh_rate(void *hwnd_opt = nullptr);
+bool display_refresh_override_push(void *hwnd_opt, int target_hz);
+void display_refresh_override_pop();
 
 // Temporarily suppresses Windows' Xbox Game Bar controller Guide button (HKCU\Software\Microsoft\GameBar\
 // UseNexusForGameBarEnabled) while Sanctum is running, and restores the user's exact original setting on exit.

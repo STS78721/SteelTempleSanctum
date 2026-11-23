@@ -11,10 +11,12 @@
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <objbase.h>
+#include <propsys.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <tlhelp32.h>
+#include <wincodec.h>
 #endif
 
 namespace sanctum {
@@ -365,7 +367,7 @@ const SystemDiag &system_diagnostics() {
     if (!disp.empty()) d.os += " " + disp;
     if (!build.empty()) d.os += " (Build " + build + ")";
 
-    // Primary GPU
+    // Primary GPU & driver version (from Display class registry)
     DISPLAY_DEVICEW dd{};
     dd.cb = sizeof dd;
     for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &dd, 0); ++i) {
@@ -375,6 +377,16 @@ const SystemDiag &system_diagnostics() {
         }
     }
     if (d.gpu.empty()) d.gpu = "Unknown GPU";
+    for (int idx = 0; idx < 8; ++idx) {
+        wchar_t sub[128];
+        swprintf(sub, 128, L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\%04d", idx);
+        std::string desc = reg_sz(HKEY_LOCAL_MACHINE, sub, L"DriverDesc");
+        std::string ver = reg_sz(HKEY_LOCAL_MACHINE, sub, L"DriverVersion");
+        if (!desc.empty() && !ver.empty()) {
+            if (desc == d.gpu || d.gpu_driver.empty()) d.gpu_driver = ver;
+            if (desc == d.gpu) break;
+        }
+    }
     return d;
 }
 
@@ -456,6 +468,369 @@ bool system_volume_set(int pct, bool mute) {
     });
 }
 
+// ---- Windows audio output enumeration & live default playback endpoint switching (zero admin)
+static const PROPERTYKEY kPkeyDeviceFriendlyName = {
+    {0xA45C254E, 0xDF1C, 0x4EFD, {0x80, 0x20, 0x67, 0xD1, 0x46, 0xA8, 0x50, 0xE0}}, 14};
+static const GUID kClsidPolicyConfigClient = {0x870AF99C, 0x171D, 0x4F9E, {0xAF, 0x0D, 0xE6, 0x3D, 0xF4, 0x0C, 0x2B, 0xC9}};
+static const GUID kIidPolicyConfig         = {0xF8679F50, 0x850A, 0x41CF, {0x9C, 0x72, 0x43, 0x0F, 0x29, 0x02, 0x90, 0xC8}};
+static const GUID kIidPolicyConfigVista    = {0x568B9108, 0x44BF, 0x40B4, {0x90, 0x06, 0x86, 0xAF, 0xE5, 0xB5, 0xA6, 0x20}};
+
+struct IPolicyConfigMinimal : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, void **) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, void **) = 0;
+    virtual HRESULT STDMETHODCALLTYPE ResetDeviceFormat(PCWSTR) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, void *, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, void *, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY &, PROPVARIANT *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY &, PROPVARIANT *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR wszDeviceId, ERole eRole) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, INT) = 0;
+};
+
+struct IPolicyConfigVistaMinimal : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, void **) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, void **) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, void *, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, void *, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, void *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY &, PROPVARIANT *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY &, PROPVARIANT *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR wszDeviceId, ERole eRole) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, INT) = 0;
+};
+
+std::vector<AudioOutput> system_audio_outputs() {
+    std::vector<AudioOutput> out;
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(co);
+    if (FAILED(co) && co != RPC_E_CHANGED_MODE) return out;
+
+    IMMDeviceEnumerator *en = nullptr;
+    if (SUCCEEDED(CoCreateInstance(kClsidMMDeviceEnumerator, nullptr, CLSCTX_ALL, kIidIMMDeviceEnumerator, (void **)&en)) && en) {
+        std::wstring def_id;
+        IMMDevice *def_dev = nullptr;
+        if (SUCCEEDED(en->GetDefaultAudioEndpoint(eRender, eConsole, &def_dev)) && def_dev) {
+            LPWSTR wid = nullptr;
+            if (SUCCEEDED(def_dev->GetId(&wid)) && wid) { def_id = wid; CoTaskMemFree(wid); }
+            def_dev->Release();
+        }
+        IMMDeviceCollection *coll = nullptr;
+        if (SUCCEEDED(en->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &coll)) && coll) {
+            UINT count = 0;
+            coll->GetCount(&count);
+            for (UINT i = 0; i < count; ++i) {
+                IMMDevice *dev = nullptr;
+                if (FAILED(coll->Item(i, &dev)) || !dev) continue;
+                LPWSTR wid = nullptr;
+                if (SUCCEEDED(dev->GetId(&wid)) && wid) {
+                    AudioOutput ao;
+                    ao.id = to_utf8(wid);
+                    ao.active = (!def_id.empty() && def_id == wid);
+                    IPropertyStore *ps = nullptr;
+                    if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &ps)) && ps) {
+                        PROPVARIANT pv;
+                        PropVariantInit(&pv);
+                        if (SUCCEEDED(ps->GetValue(kPkeyDeviceFriendlyName, &pv)) && pv.vt == VT_LPWSTR && pv.pwszVal)
+                            ao.name = to_utf8(pv.pwszVal);
+                        PropVariantClear(&pv);
+                        ps->Release();
+                    }
+                    if (ao.name.empty()) ao.name = "Audio Device " + std::to_string(i + 1);
+                    out.push_back(std::move(ao));
+                    CoTaskMemFree(wid);
+                }
+                dev->Release();
+            }
+            coll->Release();
+        }
+        en->Release();
+    }
+    if (uninit) CoUninitialize();
+    return out;
+}
+
+bool system_audio_output_set(const std::string &device_id) {
+    if (device_id.empty()) return false;
+    std::wstring wid = to_wide(device_id);
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(co);
+    if (FAILED(co) && co != RPC_E_CHANGED_MODE) return false;
+
+    bool ok = false;
+    IPolicyConfigMinimal *pc = nullptr;
+    if (SUCCEEDED(CoCreateInstance(kClsidPolicyConfigClient, nullptr, CLSCTX_ALL, kIidPolicyConfig, (void **)&pc)) && pc) {
+        HRESULT hr1 = pc->SetDefaultEndpoint(wid.c_str(), eConsole);
+        HRESULT hr2 = pc->SetDefaultEndpoint(wid.c_str(), eMultimedia);
+        pc->SetDefaultEndpoint(wid.c_str(), eCommunications);
+        ok = SUCCEEDED(hr1) || SUCCEEDED(hr2);
+        pc->Release();
+    } else {
+        IPolicyConfigVistaMinimal *pcv = nullptr;
+        if (SUCCEEDED(CoCreateInstance(kClsidPolicyConfigClient, nullptr, CLSCTX_ALL, kIidPolicyConfigVista, (void **)&pcv)) && pcv) {
+            HRESULT hr1 = pcv->SetDefaultEndpoint(wid.c_str(), eConsole);
+            HRESULT hr2 = pcv->SetDefaultEndpoint(wid.c_str(), eMultimedia);
+            pcv->SetDefaultEndpoint(wid.c_str(), eCommunications);
+            ok = SUCCEEDED(hr1) || SUCCEEDED(hr2);
+            pcv->Release();
+        }
+    }
+    if (uninit) CoUninitialize();
+    return ok;
+}
+
+// ---- Monitor bounds & WIC PNG screenshot capture (zero extra DLLs or link libraries)
+static const GUID kClsidWicImagingFactory = {0xCACAF262, 0x9370, 0x4615, {0xA1, 0x3B, 0x9F, 0x55, 0x39, 0xDA, 0x4C, 0x0A}};
+static const GUID kIidIWicImagingFactory  = {0xEC5EC8A9, 0xC395, 0x4314, {0x9C, 0x77, 0x54, 0xD7, 0xA9, 0x35, 0xFF, 0x70}};
+static const GUID kWicContainerPng        = {0x1B7CFAF4, 0x713F, 0x473C, {0xBB, 0xCD, 0x61, 0x37, 0x42, 0x5F, 0xAE, 0xAF}};
+static const GUID kWicFmt24bppBGR         = {0x6FDDC324, 0x4E03, 0x4BFE, {0xB1, 0x85, 0x3D, 0x77, 0x76, 0x8D, 0xC9, 0x0C}};
+
+bool monitor_rect_for_hwnd(void *target_hwnd, int &x, int &y, int &w, int &h) {
+    HWND hwnd = (HWND)target_hwnd;
+    HMONITOR mon = hwnd ? MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                        : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{};
+    mi.cbSize = sizeof mi;
+    if (mon && GetMonitorInfoW(mon, &mi)) {
+        x = mi.rcMonitor.left;
+        y = mi.rcMonitor.top;
+        w = mi.rcMonitor.right - mi.rcMonitor.left;
+        h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        return w > 0 && h > 0;
+    }
+    x = 0, y = 0;
+    w = GetSystemMetrics(SM_CXSCREEN);
+    h = GetSystemMetrics(SM_CYSCREEN);
+    return w > 0 && h > 0;
+}
+
+// ---- Reversible per-game display refresh rate switching (session-only ChangeDisplaySettingsExW)
+static bool g_hz_active = false;
+static std::wstring g_hz_dev;
+static DEVMODEW g_hz_orig{};
+
+static bool monitor_device_name(void *hwnd_opt, std::wstring &out) {
+    HWND hwnd = (HWND)hwnd_opt;
+    HMONITOR mon = hwnd ? MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                        : MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof mi;
+    if (mon && GetMonitorInfoW(mon, &mi) && mi.szDevice[0]) {
+        out = mi.szDevice;
+        return true;
+    }
+    return false;
+}
+
+int display_current_refresh_rate(void *hwnd_opt) {
+    std::wstring dev;
+    DEVMODEW cur{};
+    cur.dmSize = sizeof cur;
+    if (EnumDisplaySettingsExW(monitor_device_name(hwnd_opt, dev) ? dev.c_str() : nullptr, ENUM_CURRENT_SETTINGS, &cur, 0))
+        return (int)cur.dmDisplayFrequency;
+    return 0;
+}
+
+std::vector<int> display_supported_refresh_rates(void *hwnd_opt) {
+    std::vector<int> rates;
+    std::wstring dev;
+    const wchar_t *dptr = monitor_device_name(hwnd_opt, dev) ? dev.c_str() : nullptr;
+    DEVMODEW cur{};
+    cur.dmSize = sizeof cur;
+    if (!EnumDisplaySettingsExW(dptr, ENUM_CURRENT_SETTINGS, &cur, 0)) return rates;
+    DEVMODEW dm{};
+    dm.dmSize = sizeof dm;
+    for (DWORD i = 0; EnumDisplaySettingsExW(dptr, i, &dm, 0); ++i) {
+        if (dm.dmPelsWidth == cur.dmPelsWidth && dm.dmPelsHeight == cur.dmPelsHeight &&
+            dm.dmBitsPerPel == cur.dmBitsPerPel && dm.dmDisplayFrequency >= 30 && dm.dmDisplayFrequency <= 500) {
+            int hz = (int)dm.dmDisplayFrequency;
+            bool dup = false;
+            for (int r : rates) if (r == hz) { dup = true; break; }
+            if (!dup) rates.push_back(hz);
+        }
+    }
+    // Simple ascending sort, then drop NTSC fractional duplicates (e.g. 59 next to 60, 119 next to 120)
+    for (size_t i = 0; i < rates.size(); ++i)
+        for (size_t j = i + 1; j < rates.size(); ++j)
+            if (rates[j] < rates[i]) std::swap(rates[i], rates[j]);
+    std::vector<int> clean;
+    for (size_t i = 0; i < rates.size(); ++i) {
+        if (i + 1 < rates.size() && rates[i] + 1 == rates[i + 1]) continue;
+        clean.push_back(rates[i]);
+    }
+    return clean;
+}
+
+bool display_refresh_override_push(void *hwnd_opt, int target_hz) {
+    if (target_hz < 30 || target_hz > 500) return false;
+    display_refresh_override_pop();
+    std::wstring dev;
+    if (!monitor_device_name(hwnd_opt, dev)) return false;
+    DEVMODEW cur{};
+    cur.dmSize = sizeof cur;
+    if (!EnumDisplaySettingsExW(dev.c_str(), ENUM_CURRENT_SETTINGS, &cur, 0)) return false;
+    if ((int)cur.dmDisplayFrequency == target_hz) return true;   // already at target Hz
+
+    // Find an exact supported mode at current resolution + target Hz
+    DEVMODEW dm{}, match{};
+    dm.dmSize = sizeof dm;
+    bool found = false;
+    for (DWORD i = 0; EnumDisplaySettingsExW(dev.c_str(), i, &dm, 0); ++i) {
+        if (dm.dmPelsWidth == cur.dmPelsWidth && dm.dmPelsHeight == cur.dmPelsHeight &&
+            dm.dmBitsPerPel == cur.dmBitsPerPel && (int)dm.dmDisplayFrequency == target_hz) {
+            match = dm;
+            found = true;
+            break;
+        }
+    }
+    if (!found) return false;
+    match.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
+    LONG r = ChangeDisplaySettingsExW(dev.c_str(), &match, nullptr, CDS_FULLSCREEN, nullptr);
+    if (r != DISP_CHANGE_SUCCESSFUL) return false;
+    g_hz_dev = dev;
+    g_hz_orig = cur;
+    g_hz_active = true;
+    return true;
+}
+
+void display_refresh_override_pop() {
+    if (!g_hz_active) return;
+    g_hz_orig.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
+    ChangeDisplaySettingsExW(g_hz_dev.c_str(), &g_hz_orig, nullptr, 0, nullptr);
+    g_hz_active = false;
+    g_hz_dev.clear();
+}
+
+static bool write_bgra_png_wic(const uint8_t *bgra, int w, int h, const std::string &dst_png) {
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(co);
+    if (FAILED(co) && co != RPC_E_CHANGED_MODE) return false;
+
+    std::string tmp = dst_png + ".tmp";
+    std::wstring wtmp = to_wide(tmp);
+    bool ok = false;
+    IWICImagingFactory *fac = nullptr;
+    if (SUCCEEDED(CoCreateInstance(kClsidWicImagingFactory, nullptr, CLSCTX_INPROC_SERVER, kIidIWicImagingFactory, (void **)&fac)) && fac) {
+        IWICStream *stm = nullptr;
+        if (SUCCEEDED(fac->CreateStream(&stm)) && stm) {
+            if (SUCCEEDED(stm->InitializeFromFilename(wtmp.c_str(), GENERIC_WRITE))) {
+                IWICBitmapEncoder *enc = nullptr;
+                if (SUCCEEDED(fac->CreateEncoder(kWicContainerPng, nullptr, &enc)) && enc) {
+                    if (SUCCEEDED(enc->Initialize(stm, WICBitmapEncoderNoCache))) {
+                        IWICBitmapFrameEncode *frame = nullptr;
+                        if (SUCCEEDED(enc->CreateNewFrame(&frame, nullptr)) && frame) {
+                            if (SUCCEEDED(frame->Initialize(nullptr)) && SUCCEEDED(frame->SetSize((UINT)w, (UINT)h))) {
+                                WICPixelFormatGUID fmt = kWicFmt24bppBGR;
+                                frame->SetPixelFormat(&fmt);
+                                // Convert BGRA -> opaque 24-bit BGR (smaller PNGs, zero alpha issues)
+                                int stride24 = (w * 3 + 3) & ~3;
+                                std::vector<uint8_t> bgr((size_t)stride24 * (size_t)h);
+                                for (int row = 0; row < h; ++row) {
+                                    const uint8_t *src = bgra + (size_t)row * (size_t)w * 4;
+                                    uint8_t *dst = bgr.data() + (size_t)row * (size_t)stride24;
+                                    for (int col = 0; col < w; ++col) {
+                                        dst[col * 3 + 0] = src[col * 4 + 0];
+                                        dst[col * 3 + 1] = src[col * 4 + 1];
+                                        dst[col * 3 + 2] = src[col * 4 + 2];
+                                    }
+                                }
+                                if (SUCCEEDED(frame->WritePixels((UINT)h, (UINT)stride24, (UINT)bgr.size(), bgr.data())) &&
+                                    SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit())) {
+                                    ok = true;
+                                }
+                            }
+                            frame->Release();
+                        }
+                    }
+                    enc->Release();
+                }
+            }
+            stm->Release();
+        }
+        fac->Release();
+    }
+    if (uninit) CoUninitialize();
+    if (!ok) { SDL_RemovePath(tmp.c_str()); return false; }
+    if (!SDL_RenamePath(tmp.c_str(), dst_png.c_str())) { SDL_RemovePath(tmp.c_str()); return false; }
+    return true;
+}
+
+bool capture_screenshot_png(void *target_hwnd, const std::string &dst_png, int *w_out, int *h_out, bool allow_print_window) {
+    RECT rc{};
+    HWND hwnd = (HWND)target_hwnd;
+    bool got_rc = false;
+    if (hwnd && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+        using DwmGetAttrFn = HRESULT (WINAPI *)(HWND, DWORD, PVOID, DWORD);
+        static DwmGetAttrFn dwm_attr = []() -> DwmGetAttrFn {
+            HMODULE m = LoadLibraryW(L"dwmapi.dll");
+            return m ? (DwmGetAttrFn)(void *)GetProcAddress(m, "DwmGetWindowAttribute") : nullptr;
+        }();
+        // DWMWA_EXTENDED_FRAME_BOUNDS == 9 (excludes invisible Win10/11 drop shadow)
+        if (dwm_attr && SUCCEEDED(dwm_attr(hwnd, 9, &rc, sizeof rc))) got_rc = true;
+        else if (GetWindowRect(hwnd, &rc)) got_rc = true;
+    }
+    if (!got_rc) {
+        int mx = 0, my = 0, mw = 0, mh = 0;
+        if (!monitor_rect_for_hwnd(hwnd, mx, my, mw, mh)) return false;
+        rc = {mx, my, mx + mw, my + mh};
+    }
+    // Clamp capture rect to the monitor it resides on so off-screen borders are never black
+    int mx = 0, my = 0, mw = 0, mh = 0;
+    if (monitor_rect_for_hwnd(hwnd, mx, my, mw, mh)) {
+        if (rc.left < mx) rc.left = mx;
+        if (rc.top < my) rc.top = my;
+        if (rc.right > mx + mw) rc.right = mx + mw;
+        if (rc.bottom > my + mh) rc.bottom = my + mh;
+    }
+    int w = rc.right - rc.left, h = rc.bottom - rc.top;
+    if (w < 64 || h < 64) return false;
+
+    HDC screen_dc = GetDC(nullptr);
+    if (!screen_dc) return false;
+    HDC mem_dc = CreateCompatibleDC(screen_dc);
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;   // top-down BGRA
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void *bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(screen_dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!mem_dc || !bmp || !bits) {
+        if (bmp) DeleteObject(bmp);
+        if (mem_dc) DeleteDC(mem_dc);
+        ReleaseDC(nullptr, screen_dc);
+        return false;
+    }
+    HGDIOBJ old = SelectObject(mem_dc, bmp);
+    BOOL blt_ok = BitBlt(mem_dc, 0, 0, w, h, screen_dc, rc.left, rc.top, SRCCOPY);
+    if (!blt_ok && hwnd && allow_print_window) {
+        // Fallback when desktop DC BitBlt is unavailable (e.g. locked desktop / restricted compositor):
+        // PW_RENDERFULLCONTENT (2) asks DWM for the window's composed surface directly (never call on a suspended process!).
+        blt_ok = PrintWindow(hwnd, mem_dc, 2);
+    }
+    std::vector<uint8_t> pixels;
+    if (blt_ok) {
+        pixels.resize((size_t)w * (size_t)h * 4);
+        memcpy(pixels.data(), bits, pixels.size());
+    }
+    SelectObject(mem_dc, old);
+    DeleteObject(bmp);
+    DeleteDC(mem_dc);
+    ReleaseDC(nullptr, screen_dc);
+    if (!blt_ok || pixels.empty()) return false;
+
+    if (!write_bgra_png_wic(pixels.data(), w, h, dst_png)) return false;
+    if (w_out) *w_out = w;
+    if (h_out) *h_out = h;
+    return true;
+}
+
 // Reversible Xbox Game Bar Guide-button override (only active while Sanctum runs; restores original value on exit)
 static const wchar_t *kGameBarKey = L"Software\\Microsoft\\GameBar";
 static const wchar_t *kGameBarVal = L"UseNexusForGameBarEnabled";
@@ -511,10 +886,18 @@ bool recycle_path(const std::string &) { return false; }
 long long folder_size_bytes(const std::string &, int *file_count) { if (file_count) *file_count = 0; return 0; }
 std::string pick_open_file(SDL_Window *, const char *, const char *, const char *) { return {}; }
 bool zip_folder(const std::string &, const std::string &, int *files_written) { if (files_written) *files_written = 0; return false; }
-const SystemDiag &system_diagnostics() { static SystemDiag d{"Unknown", "Unknown", "Unknown", 0}; return d; }
+const SystemDiag &system_diagnostics() { static SystemDiag d{"Unknown", "Unknown", "Unknown", "", 0}; return d; }
 std::vector<DriveInfo> list_drives() { return {}; }
 bool system_volume_get(int *, bool *) { return false; }
 bool system_volume_set(int, bool) { return false; }
+std::vector<AudioOutput> system_audio_outputs() { return {}; }
+bool system_audio_output_set(const std::string &) { return false; }
+bool capture_screenshot_png(void *, const std::string &, int *, int *, bool) { return false; }
+bool monitor_rect_for_hwnd(void *, int &, int &, int &, int &) { return false; }
+std::vector<int> display_supported_refresh_rates(void *) { return {}; }
+int display_current_refresh_rate(void *) { return 0; }
+bool display_refresh_override_push(void *, int) { return false; }
+void display_refresh_override_pop() {}
 void gamebar_override_set(bool) {}
 bool is_steam_running() { return false; }
 #endif

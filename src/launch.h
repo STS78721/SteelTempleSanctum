@@ -35,12 +35,18 @@ std::string missing_for_play(const Port &p, const Install &in);   // "" when rea
 bool launch(SDL_Window *w, int port, const Install &in, bool own_launcher);
 bool game_running();
 bool game_suspended();              // true when the running game is paused via Quick Suspend (0% CPU/GPU)
+bool game_frozen();                 // true whenever the running game tree is paused (Quick Suspend OR Quick Overlay)
 bool launch_starting();             // started, its window not up yet: Sanctum shows its Starting screen
 std::string launch_starting_title();
 int running_port();                 // -1 when none
 double running_seconds();
 void close_game(bool force = false); // ends the running game (force=true terminates hung/frozen games)
 void launch_wake_sanctum(SDL_Window *w); // brings Sanctum to front while a game keeps running (in-game Guide overlay)
+void launch_wake_hwnd(void *hwnd, bool keep_topmost = false); // brings an arbitrary Sanctum HWND (e.g. transparent overlay) cleanly to foreground
+void *launch_game_hwnd();                // current visible HWND of the running game (or nullptr)
+void *launch_game_proc();                // Win32 HANDLE of the running game (for zero-inject HUD telemetry)
+unsigned long launch_game_pid();         // PID of the running game (or 0)
+std::string launch_game_log_path();      // active log path for the running game (or "")
 void launch_overlay_pause(bool pause); // soft-pauses running game while Quick Overlay / Sanctum is in front (blocks input bleed)
 bool suspend_game(SDL_Window *w);    // minimizes and pauses the running game (Quick Resume)
 bool resume_game(SDL_Window *w);     // un-suspends (if paused), hands foreground back to the game, minimizes Sanctum
@@ -73,6 +79,15 @@ struct PerfSummary {
     std::string text;   // e.g. "59.4 fps  ·  1% low 52.6"
 };
 PerfSummary port_last_perf(const Port &p, const Install &in);
+
+// Persistent multi-session FPS history per port (%APPDATA%\SteelTemple\Sanctum\perf_history.ini)
+struct PerfPoint {
+    long long ts = 0;
+    float avg_fps = 0.0f;
+    float low1_fps = 0.0f;
+};
+void perf_history_load();
+std::vector<PerfPoint> port_perf_history(const char *port_id);
 
 // async headless shader pre-warm (<exe> --prepare-shaders with CREATE_NO_WINDOW + live progress)
 struct WarmState {

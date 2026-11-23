@@ -95,6 +95,10 @@ void config_load() {
         else if (k == "follow") g_cfg.follow = v == "1";
         else if (k == "large_tiles") g_cfg.large_tiles = v == "1";
         else if (k == "home_sort") g_cfg.home_sort = v == "most_played" ? 1 : v == "az" ? 2 : 0;
+        else if (k == "border_style") g_cfg.border_style = v == "rainbow" ? 1 : v == "accent" ? 2 : v == "classic" ? 3 : 0;
+        else if (k == "border_speed") g_cfg.border_speed = v == "off" ? 0 : v == "calm" ? 1 : v == "lively" ? 3 : 2;
+        else if (k == "tile_motion") g_cfg.tile_motion = v == "off" ? 0 : v == "subtle" ? 1 : 2;
+        else if (k == "dock_style") g_cfg.dock_style = v == "classic" ? 1 : 0;
         else if (k == "pinned" && !v.empty()) {
             size_t p = 0;
             while (p < v.size()) {
@@ -107,7 +111,8 @@ void config_load() {
         }
         else if (k == "sounds") g_cfg.sounds = v == "1";
         else if (k == "sound_volume") g_cfg.sound_volume = v == "low" ? 0 : v == "high" ? 2 : 1;
-        else if (k == "sound_theme") g_cfg.sound_theme = v == "retro" ? 1 : v == "minimal" ? 2 : 0;
+        else if (k == "sound_theme") g_cfg.sound_theme = v == "bubbly" ? 1 : v == "retro" ? 2 : v == "minimal" ? 3 : 0;
+        else if (k == "sound_pitch_pan") g_cfg.sound_pitch_pan = v == "1";
         else if (k == "ambient_bgm") g_cfg.ambient_bgm = v == "hum" ? 1 : v == "custom" ? 2 : 0;
         else if (k == "bgm_path") g_cfg.bgm_path = v;
         else if (k == "rumble") g_cfg.rumble = v == "1";
@@ -119,6 +124,13 @@ void config_load() {
         else if (k == "perf_mode") g_cfg.perf_mode = v == "off" ? 0 : v == "always" ? 2 : 1;
         else if (k == "perf_power_plan") g_cfg.perf_power_plan = v == "1";
         else if (k == "perf_trim_ram") g_cfg.perf_trim_ram = v == "1";
+        else if (k == "perf_hud") g_cfg.perf_hud = v == "compact" ? 1 : v == "detailed" ? 2 : 0;
+        else if (k == "save_sync_dir") g_cfg.save_sync_dir = v;
+        else if (k == "save_sync_auto") g_cfg.save_sync_auto = v == "1";
+        else if (k.rfind("hz.", 0) == 0 && !v.empty()) {
+            int hz = atoi(v.c_str());
+            if (hz >= 30 && hz <= 500) g_cfg.refresh_hz[k.substr(3)] = hz;
+        }
         else if (k == "hide_dev") g_cfg.hide_dev = v == "1";   // (the older show_dev=0 is left behind on purpose)
         else if (k.rfind("prefer.", 0) == 0 && !v.empty()) g_cfg.prefer[k.substr(7)] = v;
         else if (k.rfind("cover.", 0) == 0 && !v.empty()) g_cfg.port_covers[k.substr(6)] = v;
@@ -166,7 +178,9 @@ void config_load() {
         g_cfg.cover_dir.clear();
         g_cfg.library_dir.clear();
         g_cfg.screenshots_dir.clear();
+        g_cfg.save_sync_dir.clear();
         g_cfg.port_covers.clear();
+        g_cfg.refresh_hz.clear();
         g_cfg.discord_rpc = false;
         g_cfg.idle_dim_min = 0;
     }
@@ -180,18 +194,26 @@ void config_save() {
     s += std::string("follow=") + (g_cfg.follow ? "1" : "0") + "\n";
     s += std::string("large_tiles=") + (g_cfg.large_tiles ? "1" : "0") + "\n";
     static const char *const sorts[] = {"last_played", "most_played", "az"};
+    static const char *const bstyles[] = {"aurora", "rainbow", "accent", "classic"};
+    static const char *const bspeeds[] = {"off", "calm", "normal", "lively"};
+    static const char *const tmotions[] = {"off", "subtle", "elastic"};
     s += std::string("home_sort=") + sorts[g_cfg.home_sort % 3] + "\n";
+    s += std::string("border_style=") + bstyles[SDL_clamp(g_cfg.border_style, 0, 3)] + "\n";
+    s += std::string("border_speed=") + bspeeds[SDL_clamp(g_cfg.border_speed, 0, 3)] + "\n";
+    s += std::string("tile_motion=") + tmotions[SDL_clamp(g_cfg.tile_motion, 0, 2)] + "\n";
+    s += std::string("dock_style=") + (g_cfg.dock_style ? "classic" : "pill") + "\n";
     if (!g_cfg.pinned.empty()) {
         std::string pin;
         for (const std::string &id : g_cfg.pinned) pin += (pin.empty() ? "" : ",") + id;
         s += "pinned=" + pin + "\n";
     }
     static const char *const vols[] = {"low", "medium", "high"};
-    static const char *const sthemes[] = {"crisp", "retro", "minimal"};
+    static const char *const sthemes[] = {"clicky", "bubbly", "retro", "minimal"};
     static const char *const bgms[] = {"off", "hum", "custom"};
     s += std::string("sounds=") + (g_cfg.sounds ? "1" : "0") + "\n";
     s += std::string("sound_volume=") + vols[g_cfg.sound_volume % 3] + "\n";
-    s += std::string("sound_theme=") + sthemes[g_cfg.sound_theme % 3] + "\n";
+    s += std::string("sound_theme=") + sthemes[SDL_clamp(g_cfg.sound_theme, 0, 3)] + "\n";
+    s += std::string("sound_pitch_pan=") + (g_cfg.sound_pitch_pan ? "1" : "0") + "\n";
     s += std::string("ambient_bgm=") + bgms[g_cfg.ambient_bgm % 3] + "\n";
     if (!g_cfg.bgm_path.empty()) s += "bgm_path=" + g_cfg.bgm_path + "\n";
     s += std::string("rumble=") + (g_cfg.rumble ? "1" : "0") + "\n";
@@ -201,9 +223,14 @@ void config_save() {
     s += std::string("guide_overlay=") + (g_cfg.guide_overlay ? "1" : "0") + "\n";
     s += std::string("guide_override_gamebar=") + (g_cfg.guide_override_gamebar ? "1" : "0") + "\n";
     static const char *const pmodes[] = {"off", "auto", "always"};
+    static const char *const hmodes[] = {"off", "compact", "detailed"};
     s += std::string("perf_mode=") + pmodes[g_cfg.perf_mode % 3] + "\n";
     s += std::string("perf_power_plan=") + (g_cfg.perf_power_plan ? "1" : "0") + "\n";
     s += std::string("perf_trim_ram=") + (g_cfg.perf_trim_ram ? "1" : "0") + "\n";
+    s += std::string("perf_hud=") + hmodes[g_cfg.perf_hud % 3] + "\n";
+    if (!g_cfg.save_sync_dir.empty()) s += "save_sync_dir=" + g_cfg.save_sync_dir + "\n";
+    s += std::string("save_sync_auto=") + (g_cfg.save_sync_auto ? "1" : "0") + "\n";
+    for (auto &e : g_cfg.refresh_hz) if (e.second > 0) s += "hz." + e.first + "=" + std::to_string(e.second) + "\n";
     s += std::string("hide_dev=") + (g_cfg.hide_dev ? "1" : "0") + "\n";
     for (auto &e : g_cfg.prefer) s += "prefer." + e.first + "=" + e.second + "\n";
     for (auto &e : g_cfg.port_covers) if (!e.second.empty()) s += "cover." + e.first + "=" + e.second + "\n";

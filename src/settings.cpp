@@ -19,6 +19,7 @@
 #include "platform.h"
 #include "selfupdate.h"
 #include "sound.h"
+#include "sync.h"
 
 namespace sanctum {
 
@@ -126,13 +127,15 @@ struct Row {
     bool section_hdr = false;
 };
 enum {
-    R_THEME, R_FOLLOW, R_TILES, R_HOME_SORT,
+    R_THEME_PRESET, R_THEME, R_FOLLOW, R_TILES, R_HOME_SORT,
+    R_BORDER_STYLE, R_BORDER_SPEED, R_TILE_MOTION, R_DOCK_STYLE,
     R_FULLSCREEN, R_DISPLAY_PICK, R_CLOCK_12H, R_IDLE_DIM, R_HIDE_CURSOR,
-    R_SOUNDS, R_SOUND_VOL, R_SOUND_THEME, R_AMBIENT_BGM, R_BGM_FILE,
+    R_SOUNDS, R_SOUND_VOL, R_SOUND_THEME, R_SOUND_PITCH, R_AMBIENT_BGM, R_BGM_FILE,
     R_FOLDER, R_SCREENSHOTS_DIR, R_RELOAD,
     R_SEARCH, R_DEV, R_LIBDIR, R_ADD_PORT, R_ADD_CUSTOM, R_PORT,
     R_STOR_DRIVE, R_STOR_CLEAR_DL, R_STOR_OPEN_BAK, R_STOR_PORT,
-    R_PERF_MODE, R_PERF_POWER, R_PERF_TRIM, R_PERF_CLEAR_CACHE,
+    R_SYNC_DIR, R_SYNC_AUTO, R_SYNC_ALL, R_SYNC_CLEAR,
+    R_PERF_MODE, R_PERF_HUD, R_PERF_POWER, R_PERF_TRIM, R_PERF_CLEAR_CACHE,
     R_PADS, R_LAYOUT, R_ICONS, R_RUMBLE, R_RUMBLE_STR, R_DEADZONE, R_GUIDE_OVERLAY, R_GUIDE_GAMEBAR, R_FORCE_CHORD,
     R_UPDATE, R_AUTO_UPDATE, R_DISCORD_RPC, R_STARTUP, R_SHORTCUT_DESKTOP, R_SHORTCUT_START, R_COPY_DIAG,
     R_INFO
@@ -158,7 +161,7 @@ static std::string build_support_info() {
     s += "OS: " + d.os + "\n";
     s += "CPU: " + d.cpu + "\n";
     s += "RAM: " + std::to_string(d.ram_gb) + " GB\n";
-    s += "GPU: " + d.gpu + "\n";
+    s += "GPU: " + d.gpu + (d.gpu_driver.empty() ? "" : (" (Driver " + d.gpu_driver + ")")) + "\n";
     int cnt = 0;
     if (SDL_JoystickID *ids = SDL_GetGamepads(&cnt)) {
         s += "Controllers: " + std::to_string(cnt);
@@ -185,10 +188,12 @@ static std::vector<Row> rows_of(int cat) {
     Config &c = cfg();
     switch (cat) {
     case CAT_DISPLAY: {
+        if (!g_startup_loaded) { g_startup_loaded = true; g_startup_on = demo_mode() ? false : startup_is_enabled(); }
         r.push_back({"Fullscreen", "", R_FULLSCREEN, true, c.fullscreen});
         std::string mon_lbl = c.display_name.empty() ? "Automatic (Primary)" : c.display_name;
         if (demo_mode()) mon_lbl = "Automatic (Primary)";
         r.push_back({"Monitor / TV", mon_lbl, R_DISPLAY_PICK});
+        r.push_back({"Start Sanctum with Windows (Console Mode)", "", R_STARTUP, true, g_startup_on});
         r.push_back({"12-hour clock", "", R_CLOCK_12H, true, c.clock_12h});
         std::string dim_lbl = c.idle_dim_min == 5 ? "After 5 min" : c.idle_dim_min == 15 ? "After 15 min" : "Off";
         r.push_back({"Idle dim (OLED protection)", dim_lbl, R_IDLE_DIM});
@@ -198,16 +203,32 @@ static std::vector<Row> rows_of(int cat) {
         const char *name = d && !demo_mode() ? SDL_GetDisplayName(d) : nullptr;
         if (m) r.push_back({"Active screen", std::string(name ? name : "Display") + "  ·  " + std::to_string(m->w) + " x " +
                                                  std::to_string(m->h) + "  ·  " + std::to_string((int)(m->refresh_rate + 0.5f)) + " Hz", R_INFO});
+        {
+            std::string hz_hint = "Set per title in Game > Files & storage";
+            if (!demo_mode()) {
+                auto rates = display_supported_refresh_rates();
+                if (!rates.empty()) {
+                    std::string list;
+                    for (size_t i = 0; i < rates.size(); ++i) {
+                        if (i) list += " / ";
+                        list += std::to_string(rates[i]);
+                    }
+                    hz_hint = list + " Hz  ·  set per game";
+                }
+            }
+            r.push_back({"Per-game refresh rate", hz_hint, R_INFO});
+        }
         r.push_back({"Shortcut", "F11 or Alt+Enter switches fullscreen at any time", R_INFO});
         break;
     }
     case CAT_SOUND: {
         static const char *const vols[] = {"Low", "Medium", "High"};
-        static const char *const themes[] = {"Switch 2 Crisp", "Warm Retro", "Soft Minimal"};
+        static const char *const themes[] = {"Tactile Click", "Bubble Pop", "Warm Retro", "Soft Minimal"};
         static const char *const bgms[] = {"Off", "Soft console hum", "Custom WAV"};
         r.push_back({"Menu sounds", "", R_SOUNDS, true, c.sounds});
+        r.push_back({"Sound profile", themes[SDL_clamp(c.sound_theme, 0, 3)], R_SOUND_THEME});
+        r.push_back({"Dynamic pitch & stereo pan", "", R_SOUND_PITCH, true, c.sound_pitch_pan});
         r.push_back({"Volume", vols[c.sound_volume % 3], R_SOUND_VOL});
-        r.push_back({"Sound profile", themes[c.sound_theme % 3], R_SOUND_THEME});
         r.push_back({"Home ambient audio", bgms[c.ambient_bgm % 3], R_AMBIENT_BGM});
         std::string bname = "Choose .wav...";
         if (!c.bgm_path.empty() && !demo_mode()) {
@@ -220,10 +241,69 @@ static std::vector<Row> rows_of(int cat) {
     }
     case CAT_THEMES: {
         static const char *const sorts[] = {"Last played", "Most played", "A to Z"};
-        r.push_back({"Theme", c.theme ? "Light" : "Dark", R_THEME});
+        static const char *const bstyles[] = {"Aurora Prism", "Spectrum Wave", "Port Accent", "Classic Cyan"};
+        static const char *const bspeeds[] = {"Static", "Calm", "Standard", "Lively"};
+        static const char *const tmotions[] = {"Off", "Subtle", "Elastic"};
+        static const char *const vols[] = {"Low", "Medium", "High"};
+        static const char *const sthemes[] = {"Tactile Click", "Bubble Pop", "Warm Retro", "Soft Minimal"};
+        static const char *const bgms[] = {"Off", "Soft console hum", "Custom WAV"};
+        auto cur_preset = [&]() -> const char * {
+            if (c.border_style == 0 && c.border_speed == 2 && c.tile_motion == 2 && c.dock_style == 0 && c.sound_theme == 0)
+                return "Sanctum Prism";
+            if (c.border_style == 3 && c.border_speed == 1 && c.tile_motion == 1 && c.dock_style == 1 && c.sound_theme == 1)
+                return "Aqua Bubble";
+            if (c.border_style == 2 && c.border_speed == 2 && c.tile_motion == 2 && c.dock_style == 0 && c.sound_theme == 0)
+                return "Port Accent";
+            if (c.border_style == 3 && c.border_speed == 0 && c.tile_motion == 0 && c.dock_style == 1 && c.sound_theme == 3)
+                return "Clean Minimal";
+            return "Custom";
+        };
+        {
+            Row hdr;
+            hdr.label = "APPEARANCE & PRESET";
+            hdr.value = "Style, animations & sound pack";
+            hdr.id = R_INFO;
+            hdr.section_hdr = true;
+            r.push_back(std::move(hdr));
+        }
+        r.push_back({"Theme preset", cur_preset(), R_THEME_PRESET});
+        r.push_back({"Color mode", c.theme ? "Light" : "Dark", R_THEME});
         r.push_back({"Home follows the selected port's colours", "", R_FOLLOW, true, c.follow});
         r.push_back({"Home tile size", c.large_tiles ? "Large" : "Medium", R_TILES});
         r.push_back({"Home sort order", sorts[c.home_sort % 3], R_HOME_SORT});
+
+        {
+            Row hdr;
+            hdr.label = "BORDER & ANIMATIONS";
+            hdr.value = "Live preview on active highlight";
+            hdr.id = R_INFO;
+            hdr.section_hdr = true;
+            r.push_back(std::move(hdr));
+        }
+        r.push_back({"Selection border style", bstyles[SDL_clamp(c.border_style, 0, 3)], R_BORDER_STYLE});
+        r.push_back({"Border animation speed", bspeeds[SDL_clamp(c.border_speed, 0, 3)], R_BORDER_SPEED});
+        r.push_back({"Tile motion & bounce", tmotions[SDL_clamp(c.tile_motion, 0, 2)], R_TILE_MOTION});
+        r.push_back({"Home dock style", c.dock_style == 0 ? "Floating Pill" : "Classic Circles", R_DOCK_STYLE});
+
+        {
+            Row hdr;
+            hdr.label = "MENU SOUNDS & AUDIO";
+            hdr.value = c.sounds ? sthemes[SDL_clamp(c.sound_theme, 0, 3)] : "Muted";
+            hdr.id = R_INFO;
+            hdr.section_hdr = true;
+            r.push_back(std::move(hdr));
+        }
+        r.push_back({"Menu sounds", "", R_SOUNDS, true, c.sounds});
+        r.push_back({"Sound profile", sthemes[SDL_clamp(c.sound_theme, 0, 3)], R_SOUND_THEME});
+        r.push_back({"Dynamic pitch & stereo pan", "", R_SOUND_PITCH, true, c.sound_pitch_pan});
+        r.push_back({"Sound volume", vols[c.sound_volume % 3], R_SOUND_VOL});
+        r.push_back({"Home ambient audio", bgms[c.ambient_bgm % 3], R_AMBIENT_BGM});
+        std::string bname = "Choose .wav...";
+        if (!c.bgm_path.empty() && !demo_mode()) {
+            size_t sl = c.bgm_path.find_last_of("\\/");
+            bname = sl == std::string::npos ? c.bgm_path : c.bgm_path.substr(sl + 1);
+        }
+        r.push_back({"Custom ambient WAV file", bname, R_BGM_FILE});
         r.push_back({"Pinned titles", c.pinned.empty() ? "None (press X on a Home tile to pin)" : (std::to_string(c.pinned.size()) + " pinned to front"), R_INFO});
         break;
     }
@@ -324,6 +404,30 @@ static std::vector<Row> rows_of(int cat) {
             }
         }
 
+        // ---- Cloud Save Sync Bridge section
+        {
+            Row hdr;
+            hdr.label = "CLOUD SAVE SYNC";
+            hdr.value = c.save_sync_dir.empty() ? "OneDrive · Google Drive · Syncthing · NAS"
+                                                : (c.save_sync_auto ? "Auto-sync after sessions" : "Manual sync");
+            hdr.id = R_INFO;
+            hdr.section_hdr = true;
+            r.push_back(std::move(hdr));
+        }
+        {
+            Row sdir;
+            sdir.label = "Cloud save sync folder";
+            sdir.value = c.save_sync_dir.empty() ? "Not set (Choose folder...)" : shown_path(c.save_sync_dir);
+            sdir.id = R_SYNC_DIR;
+            if (!c.save_sync_dir.empty()) sdir.val_col = pal().soft;
+            r.push_back(std::move(sdir));
+        }
+        if (!c.save_sync_dir.empty()) {
+            r.push_back({"Auto-sync saves after playing", "", R_SYNC_AUTO, true, c.save_sync_auto});
+            r.push_back({"Sync all local saves now", "Mirror to cloud folder", R_SYNC_ALL});
+            r.push_back({"Turn off cloud save sync", "Keeps cloud files untouched", R_SYNC_CLEAR});
+        }
+
         // ---- Library & cache section
         std::string dl_dir = local_dir() + "downloads";
         std::string bak_dir = config_dir() + "backups";
@@ -359,6 +463,7 @@ static std::vector<Row> rows_of(int cat) {
     }
     case CAT_PERF: {
         static const char *const pmodes[] = {"Off", "Auto (while gaming)", "Always on"};
+        static const char *const huds[] = {"Off", "Compact (FPS)", "Detailed (FPS · CPU · GPU · RAM)"};
         {
             Row hdr;
             hdr.label = "GAMING BOOST";
@@ -368,6 +473,7 @@ static std::vector<Row> rows_of(int cat) {
             r.push_back(std::move(hdr));
         }
         r.push_back({"Performance mode", pmodes[c.perf_mode % 3], R_PERF_MODE});
+        r.push_back({"In-game performance HUD", huds[SDL_clamp(c.perf_hud, 0, 2)], R_PERF_HUD});
         r.push_back({"High-Performance Windows power plan (AC power)", "", R_PERF_POWER, true, c.perf_power_plan});
         r.push_back({"Trim Sanctum RAM & EcoQoS while in-game", "", R_PERF_TRIM, true, c.perf_trim_ram});
         r.push_back({"Active boost tweaks", "Above Normal · EcoQoS off · 1 ms timer · Sleep off", R_INFO});
@@ -447,10 +553,53 @@ static std::vector<Row> rows_of(int cat) {
 static void act(const Row &r) {
     Config &c = cfg();
     switch (r.id) {
+    case R_THEME_PRESET: {
+        int cur = -1;
+        if (c.border_style == 0 && c.border_speed == 2 && c.tile_motion == 2 && c.dock_style == 0 && c.sound_theme == 0) cur = 0;
+        else if (c.border_style == 3 && c.border_speed == 1 && c.tile_motion == 1 && c.dock_style == 1 && c.sound_theme == 1) cur = 1;
+        else if (c.border_style == 2 && c.border_speed == 2 && c.tile_motion == 2 && c.dock_style == 0 && c.sound_theme == 0) cur = 2;
+        else if (c.border_style == 3 && c.border_speed == 0 && c.tile_motion == 0 && c.dock_style == 1 && c.sound_theme == 3) cur = 3;
+        int next = (cur + 1) % 4;
+        static const char *const kNames[] = {"Sanctum Prism", "Aqua Bubble", "Port Accent", "Clean Minimal"};
+        if (next == 0) { c.border_style = 0; c.border_speed = 2; c.tile_motion = 2; c.dock_style = 0; c.sound_theme = 0; c.sound_pitch_pan = true; }
+        else if (next == 1) { c.border_style = 3; c.border_speed = 1; c.tile_motion = 1; c.dock_style = 1; c.sound_theme = 1; c.sound_pitch_pan = true; }
+        else if (next == 2) { c.border_style = 2; c.border_speed = 2; c.tile_motion = 2; c.dock_style = 0; c.sound_theme = 0; c.sound_pitch_pan = true; }
+        else { c.border_style = 3; c.border_speed = 0; c.tile_motion = 0; c.dock_style = 1; c.sound_theme = 3; c.sound_pitch_pan = false; }
+        sound_set_theme(c.sound_theme);
+        sound_play(SFX_OK);
+        toast(std::string("Theme preset: ") + kNames[next]);
+        break;
+    }
     case R_THEME: c.theme ^= 1; theme_set(c.theme); sound_play(SFX_OK); break;
     case R_FOLLOW: c.follow = !c.follow; sound_play(c.follow ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); break;
     case R_TILES: c.large_tiles = !c.large_tiles; sound_play(SFX_OK); break;
     case R_HOME_SORT: c.home_sort = (c.home_sort + 1) % 3; sound_play(SFX_OK); break;
+    case R_BORDER_STYLE: {
+        static const char *const kB[] = {"Aurora Prism", "Spectrum Wave", "Port Accent", "Classic Cyan"};
+        c.border_style = (c.border_style + 1) % 4;
+        sound_play(SFX_OK);
+        toast(std::string("Selection border: ") + kB[c.border_style]);
+        break;
+    }
+    case R_BORDER_SPEED: {
+        static const char *const kS[] = {"Static", "Calm", "Standard", "Lively"};
+        c.border_speed = (c.border_speed + 1) % 4;
+        sound_play(SFX_OK);
+        toast(std::string("Border animation: ") + kS[c.border_speed]);
+        break;
+    }
+    case R_TILE_MOTION: {
+        static const char *const kM[] = {"Off", "Subtle", "Elastic"};
+        c.tile_motion = (c.tile_motion + 1) % 3;
+        sound_play(SFX_OK);
+        toast(std::string("Tile motion: ") + kM[c.tile_motion]);
+        break;
+    }
+    case R_DOCK_STYLE:
+        c.dock_style ^= 1;
+        sound_play(SFX_OK);
+        toast(c.dock_style == 0 ? "Home dock: Floating Pill" : "Home dock: Classic Circles");
+        break;
     case R_FULLSCREEN: set_fullscreen(!c.fullscreen); sound_play(c.fullscreen ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF); return;
     case R_DISPLAY_PICK: {
         auto mons = connected_display_names();
@@ -485,10 +634,17 @@ static void act(const Row &r) {
         sound_set_volume(c.sound_volume);
         sound_play(SFX_OK);
         break;
-    case R_SOUND_THEME:
-        c.sound_theme = (c.sound_theme + 1) % 3;
+    case R_SOUND_THEME: {
+        static const char *const kSt[] = {"Tactile Click", "Bubble Pop", "Warm Retro", "Soft Minimal"};
+        c.sound_theme = (c.sound_theme + 1) % 4;
         sound_set_theme(c.sound_theme);
         sound_play(SFX_OK);
+        toast(std::string("Sound profile: ") + kSt[c.sound_theme]);
+        break;
+    }
+    case R_SOUND_PITCH:
+        c.sound_pitch_pan = !c.sound_pitch_pan;
+        sound_play(c.sound_pitch_pan ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
         break;
     case R_AMBIENT_BGM:
         c.ambient_bgm = (c.ambient_bgm + 1) % 3;
@@ -571,12 +727,53 @@ static void act(const Row &r) {
     case R_STOR_PORT:
         if (r.aux >= 0 && r.aux < (int)ports().size()) game_open_tab(r.aux, 4);
         return;
+    case R_SYNC_DIR:
+        folder_open(c.save_sync_dir, FOLDER_SAVE_SYNC);
+        return;
+    case R_SYNC_AUTO:
+        c.save_sync_auto = !c.save_sync_auto;
+        sound_play(c.save_sync_auto ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        toast(c.save_sync_auto ? "Saves will mirror to cloud folder after playing" : "Cloud save sync set to manual");
+        break;
+    case R_SYNC_ALL: {
+        if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: sync unchanged"); return; }
+        int skipped = 0;
+        int pushed = sync_push_all(&skipped);
+        if (pushed > 0) {
+            sound_play(SFX_TOGGLE_ON);
+            std::string msg = "Synced " + std::to_string(pushed) + (pushed == 1 ? " title" : " titles") + " to cloud folder";
+            if (skipped > 0) msg += " (" + std::to_string(skipped) + " newer in cloud — check Game page)";
+            toast(msg, 4.0);
+        } else if (skipped > 0) {
+            sound_play(SFX_ERROR);
+            toast(std::to_string(skipped) + (skipped == 1 ? " title has" : " titles have") + " a newer cloud save — pull on its Game page", 4.5);
+        } else {
+            sound_play(SFX_OK);
+            toast("All local saves are already up to date");
+        }
+        return;
+    }
+    case R_SYNC_CLEAR:
+        if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: sync unchanged"); return; }
+        c.save_sync_dir.clear();
+        sync_invalidate();
+        sound_play(SFX_TOGGLE_OFF);
+        toast("Cloud save sync turned off (cloud files untouched)");
+        break;
     case R_PERF_MODE:
         c.perf_mode = (c.perf_mode + 1) % 3;
         perf_sync_idle();
         sound_play(c.perf_mode ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
         toast("Performance mode: " + perf_status_short());
         break;
+    case R_PERF_HUD: {
+        static const char *const huds[] = {"Off", "Compact (FPS)", "Detailed (FPS · CPU · GPU · RAM)"};
+        c.perf_hud = (c.perf_hud + 1) % 3;
+        overlay_sync_hud();
+        sound_play(c.perf_hud ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+        toast(std::string("Performance HUD: ") + huds[c.perf_hud]);
+        break;
+    }
     case R_PERF_POWER:
         c.perf_power_plan = !c.perf_power_plan;
         perf_sync_idle();
@@ -706,24 +903,26 @@ void settings_frame() {
     switch (a.nav) {
     case NAV_UP:
         if (!g_in_rows) {
-            if (g_cat > 0) { g_cat--; g_scroll = 0.0f; sound_play(SFX_MOVE); }
+            if (g_cat > 0) { g_cat--; g_scroll = 0.0f; sound_play_move(-1, -0.22f); }
             else sound_play(SFX_EDGE);
         } else {
             int prev = g_row;
             for (int i = g_row - 1; i >= 0; --i) if (focusable(i)) { g_row = i; break; }
             nav_moved = (g_row != prev);
-            sound_play(nav_moved ? SFX_MOVE : SFX_EDGE);
+            if (nav_moved) sound_play_move(-1, 0.14f);
+            else sound_play(SFX_EDGE);
         }
         break;
     case NAV_DOWN:
         if (!g_in_rows) {
-            if (g_cat < CAT_N - 1) { g_cat++; g_scroll = 0.0f; sound_play(SFX_MOVE); }
+            if (g_cat < CAT_N - 1) { g_cat++; g_scroll = 0.0f; sound_play_move(1, -0.22f); }
             else sound_play(SFX_EDGE);
         } else {
             int prev = g_row;
             for (int i = g_row + 1; i < (int)rows.size(); ++i) if (focusable(i)) { g_row = i; break; }
             nav_moved = (g_row != prev);
-            sound_play(nav_moved ? SFX_MOVE : SFX_EDGE);
+            if (nav_moved) sound_play_move(1, 0.14f);
+            else sound_play(SFX_EDGE);
         }
         break;
     case NAV_RIGHT:
@@ -789,7 +988,7 @@ void settings_frame() {
 
     text(x, 96, 26, p.text, kCatName[g_cat]);
     bool mouse_in_view = a.mouse.y >= top_y && a.mouse.y < top_y + view_h;
-    dl()->PushClipRect(P(x - 10, top_y - 8), P(x + w + 10, top_y + view_h + 8), true);
+    dl()->PushClipRect(P(x - 16, top_y - 14), P(x + w + 16, top_y + view_h + 14), true);
     for (int i = 0; i < (int)rows.size(); ++i) {
         const Row &r = rows[i];
         float y = top_y + ry[i] - g_scroll;
@@ -970,6 +1169,10 @@ void folder_frame() {
             } else if (g_for == FOLDER_SCREENSHOTS) {
                 cfg().screenshots_dir = g_dir;
                 toast("Album screenshots folder set");
+            } else if (g_for == FOLDER_SAVE_SYNC) {
+                cfg().save_sync_dir = g_dir;
+                sync_invalidate();
+                toast("Cloud save sync folder set", 3.5);
             } else {
                 cfg().library_dir = g_dir;
                 toast("New ports will install into " + g_dir, 3.5);
@@ -989,6 +1192,7 @@ void folder_frame() {
     status_bar();
     const char *heading = g_for == FOLDER_COVERS ? "Choose your cover-art folder"
                         : g_for == FOLDER_SCREENSHOTS ? "Choose your screenshots folder"
+                        : g_for == FOLDER_SAVE_SYNC ? "Choose your cloud save sync folder"
                         : g_for == FOLDER_ADD_PORT ? "Choose a folder holding a port"
                         : "Choose where new ports install";
     text(96, 92, 26, p.text, heading);
@@ -996,6 +1200,8 @@ void folder_frame() {
     if (!g_dir.empty() && (g_for == FOLDER_COVERS || g_for == FOLDER_SCREENSHOTS)) {
         std::string s = std::to_string(g_pngs) + (g_pngs == 1 ? " picture here" : " pictures here");
         text(1184, 130, 16, g_pngs ? p.ok : p.dim, s.c_str(), 1);
+    } else if (!g_dir.empty() && g_for == FOLDER_SAVE_SYNC) {
+        text(1184, 130, 16, p.dim, "OneDrive · Google Drive · Syncthing · NAS", 1);
     } else if (!g_dir.empty() && g_for == FOLDER_ADD_PORT) {
         std::string s = g_port_match.empty() ? "Open a folder with a port's .exe" : "Found: " + g_port_match;
         text(1184, 130, 16, g_port_match.empty() ? p.dim : p.ok, s.c_str(), 1);

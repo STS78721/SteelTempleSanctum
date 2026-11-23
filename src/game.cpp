@@ -12,6 +12,7 @@
 #include "cache.h"
 #include "config.h"
 #include "covers.h"
+#include "diag.h"
 #include "draw.h"
 #include "github.h"
 #include "install.h"
@@ -20,6 +21,7 @@
 #include "platform.h"
 #include "port_settings.h"
 #include "sound.h"
+#include "sync.h"
 
 namespace sanctum {
 
@@ -28,7 +30,7 @@ static const int kTabN = 5;
 static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0, g_file_row = 0;
 static float g_tab_x = 0, g_scroll = 0, g_scroll_to = 0, g_notes_max = 0;
 static int g_notes_game = -1, g_notes_rel = -1;
-static double g_uninstall_armed = -10, g_restore_save_armed = -10, g_clear_shaders_armed = -10;
+static double g_uninstall_armed = -10, g_restore_save_armed = -10, g_clear_shaders_armed = -10, g_sync_pull_armed = -10;
 enum { ROW_ACTIONS, ROW_COPIES, ROW_RELEASES, ROW_NOTES, ROW_SETTINGS, ROW_MODS, ROW_FILES };
 static int g_row = ROW_ACTIONS;
 
@@ -188,7 +190,7 @@ struct Action {
     std::string label;
     int id;
 };
-enum { ACT_PLAY, ACT_RESUME, ACT_SUSPEND, ACT_DOWNLOAD, ACT_UPDATE, ACT_LAUNCHER, ACT_GITHUB, ACT_PROGRESS, ACT_CLOSE, ACT_LOG, ACT_REPORT, ACT_ISSUE };
+enum { ACT_PLAY, ACT_RESUME, ACT_SUSPEND, ACT_DOWNLOAD, ACT_UPDATE, ACT_LAUNCHER, ACT_GITHUB, ACT_PROGRESS, ACT_CLOSE, ACT_LOG, ACT_DIAG, ACT_REPORT, ACT_ISSUE };
 static double g_close_armed = -10;   // Close game asks for a second press
 
 // GitHub's Markdown, drawn plainly: headings larger, bullets as dots, emphasis and code marks dropped, links as text
@@ -272,10 +274,13 @@ void game_frame() {
     // after a run that went wrong: what to do about it
     if (has_lr && !running && (lr_val.verdict == RUN_CRASH || lr_val.verdict == RUN_NO_START)) {
         if (!lr_val.log.empty()) acts.push_back({IC_NEWS, "Open the log", ACT_LOG});
+        acts.push_back({IC_DOWNLOAD, "Export diagnostics", ACT_DIAG});
         acts.push_back({IC_INFO, "Report it", ACT_REPORT});
     }
-    if (has_lr && !running && (lr_val.verdict == RUN_KNOWN || lr_val.verdict == RUN_FIXED) && !lr_val.issue.empty())
+    if (has_lr && !running && (lr_val.verdict == RUN_KNOWN || lr_val.verdict == RUN_FIXED) && !lr_val.issue.empty()) {
+        if (lr_val.verdict == RUN_KNOWN) acts.push_back({IC_DOWNLOAD, "Export diagnostics", ACT_DIAG});
         acts.push_back({IC_INFO, "Issue " + lr_val.issue, ACT_ISSUE});
+    }
     if (!running && in && in->launcher && can_play(port, *in)) acts.push_back({IC_GEAR, "Port's own launcher", ACT_LAUNCHER});
     if (!port.custom) acts.push_back({IC_INFO, "Open on GitHub", ACT_GITHUB});
     // the buttons changed (an update finished, a download started): focus goes back to the main one
@@ -322,6 +327,20 @@ void game_frame() {
             else { sound_play(SFX_ERROR); g_close_armed = a.now; toast("Press again to close the game (unsaved progress is lost)", 3); }
             break;
         case ACT_LOG: if (has_lr) { sound_play(SFX_OK); SDL_OpenURL(("file:///" + lr_val.log).c_str()); } break;
+        case ACT_DIAG: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: diagnostics disabled"); break; }
+            std::string zp = export_crash_diagnostics(a.game, in, has_lr ? &lr_val : nullptr);
+            if (!zp.empty()) {
+                sound_play(SFX_TOGGLE_ON);
+                toast("Exported sanitized diagnostics zip (path copied)", 4.0);
+                size_t sl = zp.find_last_of("\\/");
+                SDL_OpenURL(("file:///" + (sl == std::string::npos ? zp : zp.substr(0, sl))).c_str());
+            } else {
+                sound_play(SFX_ERROR);
+                toast("Could not create diagnostics bundle");
+            }
+            break;
+        }
         case ACT_REPORT: sound_play(SFX_OK); SDL_OpenURL((std::string("https://github.com/") + port.repo + "/issues/new").c_str()); break;
         case ACT_ISSUE: {
             sound_play(SFX_OK);
@@ -360,7 +379,8 @@ void game_frame() {
     // files & storage action list (needed for Up/Down/A handling)
     struct FileRow { std::string label, value; int id; };
     enum { F_OPEN_DIR, F_OPEN_LOGS, F_VERIFY, F_CLEAR_SHADERS, F_PREWARM_SHADERS,
-           F_BACKUP_SAVES, F_RESTORE_SAVES, F_BACKUP_INI, F_RESTORE_INI,
+           F_CLOUD_SYNC, F_BACKUP_SAVES, F_RESTORE_SAVES, F_BACKUP_INI, F_RESTORE_INI,
+           F_REFRESH_HZ, F_EXPORT_DIAG,
            F_CUSTOM_COVER, F_CLEAR_COVER, F_LAUNCH_ARGS, F_LAUNCH_ENV, F_PIN, F_UNINSTALL };
     std::vector<FileRow> frows;
     std::string f_ini, f_bak, f_miss, f_save_dir, f_save_bak;
@@ -421,6 +441,14 @@ void game_frame() {
                              : "Build shader & driver cache";
             frows.push_back({"Pre-warm shader cache", wval, F_PREWARM_SHADERS});
         }
+        if (!cfg().save_sync_dir.empty() && !demo_mode()) {
+            SyncInfo si = sync_inspect(port, *in);
+            bool pull_armed = a.now - g_sync_pull_armed < 4.0;
+            std::string sval = (pull_armed && (si.kind == SYNC_CLOUD_NEWER || si.kind == SYNC_CONFLICT))
+                             ? "Press again to pull cloud save (local backed up first)"
+                             : si.summary;
+            frows.push_back({"Cloud save sync", sval, F_CLOUD_SYNC});
+        }
         if (!f_save_dir.empty()) {
             frows.push_back({"Back up save files", f_save_cnt ? (std::to_string(f_save_cnt) + " saved") : "Create zip backup", F_BACKUP_SAVES});
             if (!f_save_bak.empty()) {
@@ -435,6 +463,10 @@ void game_frame() {
             frows.push_back({"Restore settings backup", ".sanctum-bak", F_RESTORE_INI});
         else if (!f_ini.empty() && SDL_GetPathInfo(f_ini.c_str(), nullptr))
             frows.push_back({"Back up settings", "Save .sanctum-bak", F_BACKUP_INI});
+        auto hz_it = cfg().refresh_hz.find(port.id);
+        int tgt_hz = (hz_it != cfg().refresh_hz.end()) ? hz_it->second : 0;
+        frows.push_back({"Display refresh rate", tgt_hz > 0 ? (std::to_string(tgt_hz) + " Hz (restored on exit)") : "System default", F_REFRESH_HZ});
+        frows.push_back({"Export diagnostics bundle", "Sanitized .zip for GitHub", F_EXPORT_DIAG});
         auto cov_it = cfg().port_covers.find(port.id);
         bool has_cov = cov_it != cfg().port_covers.end() && !cov_it->second.empty();
         frows.push_back({"Custom cover art", has_cov ? "Change image..." : "Pick image...", F_CUSTOM_COVER});
@@ -515,6 +547,76 @@ void game_frame() {
                 toast("Cancelling shader pre-warm...");
             } else {
                 launch_prepare_shaders(a.game, *in);
+            }
+            break;
+        }
+        case F_CLOUD_SYNC: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: saves unchanged"); break; }
+            if (running) { sound_play(SFX_ERROR); toast("Close the game before syncing saves"); break; }
+            SyncInfo si = sync_inspect(port, *in, true);
+            if (si.kind == SYNC_CLOUD_NEWER || si.kind == SYNC_CONFLICT) {
+                if (a.now - g_sync_pull_armed < 4.0) {
+                    g_sync_pull_armed = -10.0;
+                    std::string err;
+                    if (sync_pull_now(port, *in, err)) {
+                        sound_play(SFX_TOGGLE_ON);
+                        toast("Pulled cloud save safely (local copy backed up)", 3.5);
+                    } else {
+                        sound_play(SFX_ERROR);
+                        toast("Cloud pull failed: " + err, 4.0);
+                    }
+                } else {
+                    g_sync_pull_armed = a.now;
+                    sound_play(SFX_ERROR);
+                    toast("Press again to pull cloud save (existing local saves are backed up first)", 4.0);
+                }
+            } else {
+                std::string err;
+                if (sync_push_now(port, *in, err)) {
+                    sound_play(SFX_TOGGLE_ON);
+                    toast("Pushed " + std::string(port.name) + " saves to cloud folder", 3.0);
+                } else {
+                    sound_play(SFX_ERROR);
+                    toast("Cloud push failed: " + err, 4.0);
+                }
+            }
+            break;
+        }
+        case F_REFRESH_HZ: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: display unchanged"); break; }
+            void *hwnd = SDL_GetPointerProperty(SDL_GetWindowProperties(a.window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+            std::vector<int> rates = display_supported_refresh_rates(hwnd);
+            if (rates.empty()) { sound_play(SFX_ERROR); toast("No alternate refresh rates reported by this display"); break; }
+            // Cycle: 0 (System default) -> supported rates -> 0
+            int cur = cfg().refresh_hz.count(port.id) ? cfg().refresh_hz[port.id] : 0;
+            int next = 0;
+            if (cur == 0) {
+                next = rates.front();
+            } else {
+                for (size_t i = 0; i < rates.size(); ++i) {
+                    if (rates[i] == cur) { next = (i + 1 < rates.size()) ? rates[i + 1] : 0; break; }
+                    if (rates[i] > cur) { next = rates[i]; break; }
+                }
+            }
+            if (next > 0) cfg().refresh_hz[port.id] = next;
+            else cfg().refresh_hz.erase(port.id);
+            config_save();
+            sound_play(next > 0 ? SFX_TOGGLE_ON : SFX_TOGGLE_OFF);
+            toast(next > 0 ? ("Refresh rate target: " + std::to_string(next) + " Hz while playing")
+                           : "Refresh rate: System default");
+            break;
+        }
+        case F_EXPORT_DIAG: {
+            if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: diagnostics disabled"); break; }
+            std::string zp = export_crash_diagnostics(a.game, in, has_lr ? &lr_val : nullptr);
+            if (!zp.empty()) {
+                sound_play(SFX_TOGGLE_ON);
+                toast("Exported sanitized diagnostics zip (path copied)", 4.0);
+                size_t sl = zp.find_last_of("\\/");
+                SDL_OpenURL(("file:///" + (sl == std::string::npos ? zp : zp.substr(0, sl))).c_str());
+            } else {
+                sound_play(SFX_ERROR);
+                toast("Could not export diagnostics bundle");
             }
             break;
         }
@@ -759,33 +861,81 @@ void game_frame() {
         progress_bar(96, 404, 290, 10, f, port.colours.accent);
     }
 
-    // Per-game Time Played + last-session performance telemetry card neatly below the cover art
+    // Per-game Time Played + last-session performance telemetry + multi-session FPS sparkline below cover art
     {
         PerfSummary perf = (in && !demo_mode()) ? port_last_perf(port, *in) : PerfSummary{};
+        std::vector<PerfPoint> hist = demo_mode()
+            ? std::vector<PerfPoint>{{1, 56.2f, 44.0f}, {2, 58.1f, 48.2f}, {3, 57.4f, 46.8f},
+                                     {4, 59.3f, 52.1f}, {5, 59.8f, 54.4f}, {6, 59.9f, 56.3f}}
+            : port_perf_history(port.id);
         if (demo_mode()) {
             perf.valid = true;
             perf.avg_fps = 59.8f;
             perf.low1_fps = 56.3f;
             perf.text = "59.8 fps  ·  1% low 56.3";
         }
-        float sy = 448, sw = 330, sh = perf.valid ? 194.0f : 166.0f;
+        bool show_spark = hist.size() >= 2;
+        float sy = show_spark ? 442.0f : 444.0f, sw = 330.0f;
+        float sh = perf.valid ? (show_spark ? 204.0f : 192.0f) : 164.0f;
         rect(76, sy, sw, sh, p.panel, 16);
         rect(92, sy, sw - 32, 3, port.colours.accent, 1.5f);
-        text(96, sy + 16, 12, p.dim, "TIME PLAYED");
-        text(76 + sw - 20, sy + 16, 12, p.dim, fit(12, demo_mode() ? "Player 1" : cfg().profile, 140).c_str(), 1);
+        text(96, sy + 12, 12, p.dim, "TIME PLAYED");
+        text(76 + sw - 20, sy + 12, 12, p.dim, fit(12, demo_mode() ? "Player 1" : cfg().profile, 140).c_str(), 1);
         std::string dur = demo_mode() ? "3 h 40 min" : played_duration_short(a.game);
         std::string lp  = demo_mode() ? "Today" : last_played_short(a.game);
         int sess = demo_mode() ? 6 : played_sessions(a.game);
-        text(96, sy + 38, 26, p.text, fit(26, dur, sw - 40).c_str());
-        rect(96, sy + 80, sw - 40, 1, p.line);
-        text(96, sy + 94, 14, p.soft, "Last played");
-        text(76 + sw - 20, sy + 94, 14, p.text, lp.c_str(), 1);
-        text(96, sy + 124, 14, p.soft, "Sessions");
-        text(76 + sw - 20, sy + 124, 14, p.text, sess > 0 ? std::to_string(sess).c_str() : "—", 1);
-        if (perf.valid) {
-            text(96, sy + 154, 14, p.soft, "Last run");
+        if (show_spark && perf.valid) {
+            text(96, sy + 28, 22, p.text, fit(22, dur, sw - 40).c_str());
+            rect(96, sy + 58, sw - 40, 1, p.line);
+            text(96, sy + 66, 13, p.soft, "Last played");
+            text(76 + sw - 20, sy + 66, 13, p.text, lp.c_str(), 1);
+            text(96, sy + 88, 13, p.soft, "Sessions");
+            text(76 + sw - 20, sy + 88, 13, p.text, sess > 0 ? std::to_string(sess).c_str() : "—", 1);
+            text(96, sy + 110, 13, p.soft, "Last run");
             ImU32 fc = perf.avg_fps >= 55.0f ? p.ok : (perf.avg_fps >= 29.0f ? p.text : p.warn);
-            text(76 + sw - 20, sy + 155, 13, fc, fit(13, perf.text, 215).c_str(), 1);
+            text(76 + sw - 20, sy + 110, 13, fc, fit(13, perf.text, 215).c_str(), 1);
+        } else {
+            text(96, sy + 34, 25, p.text, fit(25, dur, sw - 40).c_str());
+            rect(96, sy + 74, sw - 40, 1, p.line);
+            text(96, sy + 86, 14, p.soft, "Last played");
+            text(76 + sw - 20, sy + 86, 14, p.text, lp.c_str(), 1);
+            text(96, sy + 114, 14, p.soft, "Sessions");
+            text(76 + sw - 20, sy + 114, 14, p.text, sess > 0 ? std::to_string(sess).c_str() : "—", 1);
+            if (perf.valid) {
+                text(96, sy + 142, 14, p.soft, "Last run");
+                ImU32 fc = perf.avg_fps >= 55.0f ? p.ok : (perf.avg_fps >= 29.0f ? p.text : p.warn);
+                text(76 + sw - 20, sy + 143, 13, fc, fit(13, perf.text, 215).c_str(), 1);
+            }
+        }
+        if (perf.valid && show_spark) {
+            float gx = 96, gy = sy + 134, gw = sw - 40, gh = 58;
+            rect(gx, gy, gw, gh, p.panel2, 8);
+            float mn = hist[0].avg_fps, mx = hist[0].avg_fps;
+            for (const PerfPoint &pt : hist) { mn = std::min(mn, pt.avg_fps); mx = std::max(mx, pt.avg_fps); }
+            float lo = std::max(0.0f, std::floor(mn - 4.0f));
+            float hi = std::max(lo + 8.0f, std::ceil(mx + 2.0f));
+            std::vector<ImVec2> pts;
+            pts.reserve(hist.size());
+            for (size_t i = 0; i < hist.size(); ++i) {
+                float fx = hist.size() > 1 ? (float)i / (float)(hist.size() - 1) : 1.0f;
+                float fy = SDL_clamp((hist[i].avg_fps - lo) / (hi - lo), 0.0f, 1.0f);
+                pts.push_back(P(gx + 10.0f + fx * (gw - 20.0f), gy + gh - 8.0f - fy * (gh - 24.0f)));
+            }
+            for (size_t i = 1; i < pts.size(); ++i) {
+                ImVec2 b0(pts[i - 1].x, P(0, gy + gh - 5.0f).y), b1(pts[i].x, P(0, gy + gh - 5.0f).y);
+                dl()->AddQuadFilled(pts[i - 1], pts[i], b1, b0, with_alpha(port.colours.accent, 36));
+            }
+            dl()->AddPolyline(pts.data(), (int)pts.size(), with_alpha(port.colours.accent, 235), ImDrawFlags_None, S(2.0f));
+            for (size_t i = 0; i < pts.size(); ++i) {
+                bool last_pt = (i + 1 == pts.size());
+                dl()->AddCircleFilled(pts[i], S(last_pt ? 3.5f : 2.2f), last_pt ? p.ok : port.colours.accent);
+            }
+            char hlbl[48];
+            SDL_snprintf(hlbl, sizeof hlbl, "FPS trend  ·  %d runs", (int)hist.size());
+            text(gx + 8, gy + 4, 11, p.dim, hlbl);
+            char rlbl[32];
+            SDL_snprintf(rlbl, sizeof rlbl, "%.0f-%.0f fps", mn, mx);
+            text(gx + gw - 8, gy + 4, 11, p.dim, rlbl, 1);
         }
     }
 
@@ -813,6 +963,12 @@ void game_frame() {
     if (running && game_suspended()) chip("Suspended  ·  Quick Resume", p.warn, with_alpha(p.warn, 45));
     else if (running) chip("Running  ·  " + std::to_string((int)running_seconds() / 60) + " min", p.ok, with_alpha(p.ok, 40));
     else if (in && !busy && !can_play(port, *in)) chip("First start: set up with your own game files", p.warn, p.panel2);
+    if (in && !demo_mode() && !cfg().save_sync_dir.empty()) {
+        SyncInfo si = sync_inspect(port, *in);
+        if (si.kind == SYNC_CLOUD_NEWER || si.kind == SYNC_CONFLICT)
+            chip("Cloud save newer" + (si.cloud_host.empty() ? std::string() : (" (" + si.cloud_host + ")")),
+                 p.warn, with_alpha(p.warn, 42));
+    }
     if (port.installs.size() > 1) chip(std::to_string(port.installs.size()) + " copies on this PC", p.soft, p.panel2);
 
     float ax = x;
@@ -831,7 +987,7 @@ void game_frame() {
         ImU32 fg = primary ? (bright ? IM_COL32(20, 20, 20, 255) : IM_COL32_WHITE) : p.text;
         icon(acts[i].icon, ax + 32, 297, 20, fg);
         text(ax + 52, 285, 19, fg, acts[i].label.c_str());
-        if (g_row == ROW_ACTIONS && i == g_action) focus_ring(ax, 268, w, 58, 29, 5);
+        if (g_row == ROW_ACTIONS && i == g_action) focus_ring(ax, 268, w, 58, 29, 5, port.colours.accent);
         ax += w + 14;
     }
 
@@ -1027,7 +1183,7 @@ void game_frame() {
                     progress_bar(x + 14, y + 34, 752, 3, frac, port.colours.accent);
                 }
             }
-            if (g_row == ROW_FILES && i == g_file_row) focus_ring(x, y, 780, 40, 10, 3);
+            if (g_row == ROW_FILES && i == g_file_row) focus_ring(x, y, 780, 40, 10, 3, port.colours.accent);
         }
         if (n > kVis) {
             float h = 46 * kVis - 6, bh = h * kVis / n;

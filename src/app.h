@@ -18,8 +18,8 @@ enum Nav { NAV_NONE, NAV_LEFT, NAV_RIGHT, NAV_UP, NAV_DOWN, NAV_A, NAV_B, NAV_X,
 // What the connected pad's face buttons look like, for the button hints.
 enum PadStyle { PAD_KEYBOARD, PAD_XBOX, PAD_NINTENDO, PAD_PLAYSTATION, PAD_GENERIC };
 
-enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE, SCR_MODS, SCR_ALBUM };
-enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY, FOLDER_ADD_PORT, FOLDER_SCREENSHOTS };
+enum Screen { SCR_HOME, SCR_GAME, SCR_SETTINGS, SCR_FOLDER, SCR_CONTROLLERS, SCR_SOON, SCR_PORTS, SCR_DOWNLOADS, SCR_NEWS, SCR_PORT_SETTINGS, SCR_PROFILE, SCR_MODS, SCR_ALBUM, SCR_LIBRARY };
+enum FolderFor { FOLDER_COVERS, FOLDER_LIBRARY, FOLDER_ADD_PORT, FOLDER_SCREENSHOTS, FOLDER_SAVE_SYNC };
 
 struct Toast {
     std::string text;
@@ -80,6 +80,8 @@ bool hover(float x, float y, float w, float h);
 
 // screens: each handles app().nav / mouse for itself, then draws
 void home_frame();
+void library_open();          // Show more: full grid of installed ports, custom PC games & Add custom game
+void library_frame();
 void game_frame();
 void settings_frame();
 void folder_frame();
@@ -97,6 +99,8 @@ void album_init(struct SDL_Renderer *r);
 void album_open();            // Switch-style screenshots Album (album.cpp)
 void album_frame();
 void album_poll();
+// Captures a screenshot of target_hwnd (or active monitor) into Sanctum's Album folder; returns saved PNG path or ""
+std::string album_take_screenshot(void *target_hwnd, int port_idx = -1, bool allow_print_window = true);
 
 // the controller folder picker; X sets the cover-art folder or the folder new ports install into
 void folder_open(const std::string &start, FolderFor what = FOLDER_COVERS);

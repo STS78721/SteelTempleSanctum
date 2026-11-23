@@ -38,6 +38,9 @@ void input_bg_event(const SDL_Event &e, double now);
 bool input_poll_guide_press(double now);
 void input_suppress_guide(double now);
 
+// Instant screenshot trigger: Share (Xbox) / Capture (Switch) / Mic-Mute (DualSense) = SDL_GAMEPAD_BUTTON_MISC1 (plus F12/PrtSc inside Sanctum)
+bool input_poll_capture_press(double now);
+
 // Waits briefly until held controller buttons / triggers / confirm keys are released before handing focus back to a game,
 // so the A / B / Guide press that triggered Resume / Quick Resume never bleeds into the game.
 void input_wait_buttons_released(int max_ms = 650);

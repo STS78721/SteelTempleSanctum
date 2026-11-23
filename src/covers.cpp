@@ -27,6 +27,7 @@ struct Decoded {
 
 static SDL_Renderer *g_r;
 static std::map<std::string, SDL_Texture *> g_tex;
+static std::map<std::string, std::string> g_paths;
 static std::mutex g_lock;
 static std::vector<Decoded> g_ready;
 static std::set<std::string> g_matched_ids;   // set by a finished worker: the ports that currently have art
@@ -175,7 +176,10 @@ static int worker(void *p) {
         if (!load_image_rgba(chosen_path, 512, d.w, d.h, d.rgba)) continue;
         matched.insert(port.id);
         std::lock_guard<std::mutex> l(g_lock);
-        if (job->generation == g_generation) g_ready.push_back(std::move(d));
+        if (job->generation == g_generation) {
+            g_paths[port.id] = chosen_path;
+            g_ready.push_back(std::move(d));
+        }
     }
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -273,6 +277,13 @@ void covers_poll(double now) {
 SDL_Texture *cover(const char *id) {
     auto it = g_tex.find(id);
     return it == g_tex.end() ? nullptr : it->second;
+}
+
+std::string cover_path_of(const char *id) {
+    if (!id) return {};
+    std::lock_guard<std::mutex> l(g_lock);
+    auto it = g_paths.find(id);
+    return it == g_paths.end() ? std::string() : it->second;
 }
 
 int covers_matched() { return g_matched; }

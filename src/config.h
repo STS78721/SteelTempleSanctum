@@ -19,10 +19,15 @@ struct Config {
     bool follow = true;           // the focused port tints Home
     bool large_tiles = true;
     int home_sort = 0;            // 0 last played, 1 most played, 2 A-Z
+    int border_style = 0;         // 0 Switch 2 Aurora, 1 Rainbow Spectrum, 2 Port Accent Glow, 3 Classic Cyan
+    int border_speed = 2;         // 0 Off (static), 1 Calm, 2 Switch 2, 3 Lively
+    int tile_motion = 2;          // 0 Off, 1 Subtle, 2 Switch 2 Elastic (spring glide + micro-bounce)
+    int dock_style = 0;           // 0 Switch 2 Floating Pill (colored icons), 1 Classic Circles
     std::set<std::string> pinned; // port ids pinned to the front of Home
     bool sounds = true;
     int sound_volume = 1;         // 0 low, 1 medium, 2 high
-    int sound_theme = 0;          // 0 Switch 2 Crisp, 1 Warm Retro, 2 Soft Minimal
+    int sound_theme = 0;          // 0 Switch 2 Clicky, 1 Switch 1 Bubbly, 2 Warm Retro, 3 Soft Minimal
+    bool sound_pitch_pan = true;  // subtle Switch 2 dynamic pitch stepping & stereo panning on navigation
     int ambient_bgm = 0;          // 0 Off, 1 Soft console hum, 2 Custom WAV
     std::string bgm_path;         // custom .wav path when ambient_bgm == 2
     bool rumble = true;           // subtle controller vibration on focus & confirm
@@ -34,6 +39,10 @@ struct Config {
     int perf_mode = 1;            // 0 Off, 1 Auto (boost while gaming), 2 Always On
     bool perf_power_plan = true;  // switch to High Performance Windows power plan/overlay on AC power
     bool perf_trim_ram = true;    // drop Sanctum to EcoQoS + trim working set RAM while minimized in-game
+    int perf_hud = 0;             // 0 Off, 1 Compact (FPS), 2 Detailed (FPS + CPU + GPU + RAM + Battery)
+    std::string save_sync_dir;    // optional cloud-synced folder (OneDrive / Google Drive / Syncthing / NAS)
+    bool save_sync_auto = true;   // auto-mirror save snapshot to save_sync_dir after each session
+    std::map<std::string, int> refresh_hz; // port id -> optional target display Hz while running (0 = system default)
     bool hide_dev = false;        // leave out copies inside build / staging / backup folders (they rank last anyway)
     std::map<std::string, std::string> prefer;   // port id -> the copy the player chose ("Use this copy")
     bool fullscreen = true;       // starts fullscreen, like a console

@@ -12,6 +12,7 @@ void covers_init(SDL_Renderer *r);
 void covers_reload();                     // after the folder or per-game cover changes
 void covers_poll(double now);             // UI thread: decoded images into textures; watches the folder
 SDL_Texture *cover(const char *port_id);  // nullptr until loaded (or if none)
+std::string cover_path_of(const char *port_id); // resolved image file path for a matched port cover (or empty)
 int covers_matched();                     // how many ports have cover art
 int count_pngs(const std::string &dir);   // the pictures in a folder (png, jpg, jpeg, bmp)
 

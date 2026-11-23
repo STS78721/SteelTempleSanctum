@@ -12,11 +12,14 @@
 #include "app.h"
 #include "config.h"
 #include "discord_rpc.h"
+#include "hud.h"
 #include "input.h"
 #include "overlay.h"
 #include "perf.h"
+#include "platform.h"
 #include "port_settings.h"
 #include "sound.h"
+#include "sync.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -213,6 +216,10 @@ std::string port_save_dir(const Port &p, const Install &in) {
     return {};
 }
 
+static HWND hwnd_of(SDL_Window *w) {
+    return (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(w), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+}
+
 bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     if (g_proc) { sound_play(SFX_ERROR); toast("A game is already running"); return false; }
     if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: games don't start"); return false; }
@@ -316,7 +323,17 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     g_suspended = false, g_overlay_paused = false, g_tree_frozen = false, g_overlay_pause_at = 0;
     g_suspend_at = 0, g_suspended_ms = 0;
     g_last.erase(port_i);
+    hud_reset();
     perf_boost_game_start(g_proc, g_pid);
+    if (play) {
+        auto hzit = cfg().refresh_hz.find(p.id);
+        if (hzit != cfg().refresh_hz.end() && hzit->second > 0) {
+            if (display_refresh_override_push((void *)hwnd_of(w), hzit->second))
+                sanctum_log("launch: switched display to %d Hz for %s", hzit->second, p.id);
+            else
+                sanctum_log("launch: display refresh override %d Hz unavailable on current desktop", hzit->second);
+        }
+    }
     // Sanctum stays in front (its Starting screen) until the game's window is up, then hands it the foreground.
     if (g_pid) AllowSetForegroundWindow(g_pid);
     g_starting = true;
@@ -388,7 +405,7 @@ static void handoff_to_game(HWND h, const std::set<DWORD> &pids, bool restoring 
 
 // Windows lets only the foreground process give the foreground away; when Sanctum is not it (coming back from a
 // game), a tap of Alt lifts that lock for the next call, the usual way for a program the player is returning to.
-static void bring_to_front(HWND h, bool unlock) {
+static void bring_to_front(HWND h, bool unlock, bool keep_topmost = false) {
     if (!h) return;
     if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
     if (unlock) {
@@ -398,9 +415,12 @@ static void bring_to_front(HWND h, bool unlock) {
         in[1].ki.dwFlags = KEYEVENTF_KEYUP;
         SendInput(2, in, sizeof(INPUT));
     }
+    if (keep_topmost) {
+        SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    }
     SetForegroundWindow(h);
     BringWindowToTop(h);
-    if (GetForegroundWindow() != h) {
+    if (!keep_topmost && GetForegroundWindow() != h) {
         // Fallback when Windows' foreground lock resists over a borderless fullscreen Vulkan/DXGI game:
         // briefly pulse TOPMOST -> NOTOPMOST (never cross-process AttachThreadInput, so a hung game can't block us).
         SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
@@ -411,15 +431,12 @@ static void bring_to_front(HWND h, bool unlock) {
     SetFocus(h);
 }
 
-static HWND hwnd_of(SDL_Window *w) {
-    return (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(w), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-}
-
 bool launch_starting() { return g_proc && g_starting; }
 std::string launch_starting_title() { return g_port >= 0 ? ports()[g_port].title : ""; }
 
 bool game_running() { return g_proc != nullptr; }
 bool game_suspended() { return g_proc != nullptr && g_suspended; }
+bool game_frozen() { return g_proc != nullptr && g_tree_frozen; }
 int running_port() { return g_proc ? g_port : -1; }
 double running_seconds() {
     if (!g_proc) return 0;
@@ -510,6 +527,26 @@ void launch_wake_sanctum(SDL_Window *w) {
     SDL_RaiseWindow(w);
 }
 
+void launch_wake_hwnd(void *hwnd, bool keep_topmost) {
+    if (hwnd) bring_to_front((HWND)hwnd, true, keep_topmost);
+}
+
+void *launch_game_hwnd() {
+    if (!g_proc || !g_pid) return nullptr;
+    std::set<DWORD> pids = collect_process_tree(g_pid);
+    Find f{&pids, nullptr, 0};
+    if (!pids.empty()) EnumWindows(find_window, (LPARAM)&f);
+    return (void *)f.found;
+}
+
+void *launch_game_proc() { return (void *)g_proc; }
+unsigned long launch_game_pid() { return (unsigned long)g_pid; }
+std::string launch_game_log_path() {
+    if (!g_proc || g_port < 0 || g_port >= (int)ports().size()) return {};
+    std::string rel = port_log_rel(ports()[g_port]);
+    return rel.empty() ? std::string() : (g_in.dir + "\\" + rel);
+}
+
 void launch_overlay_pause(bool pause) {
     if (!g_proc || g_starting) return;
     if (pause) {
@@ -543,6 +580,7 @@ bool suspend_game(SDL_Window *w) {
     g_overlay_paused = false;
     g_suspend_at = SDL_GetTicks();
     perf_boost_game_stop();   // release 1 ms timer & High Performance power plan while suspended
+    display_refresh_override_pop();
     if (g_port >= 0 && g_port < (int)ports().size()) {
         const Port &p = ports()[g_port];
         discord_rpc_set_activity(std::string("Suspended  ·  ") + p.title, "Quick Resume in Sanctum");
@@ -575,6 +613,11 @@ bool resume_game(SDL_Window *w) {
         SDL_Delay(40);
     }
     perf_boost_game_start(g_proc, g_pid);
+    if (g_port >= 0 && g_port < (int)ports().size()) {
+        auto hzit = cfg().refresh_hz.find(ports()[g_port].id);
+        if (hzit != cfg().refresh_hz.end() && hzit->second > 0)
+            display_refresh_override_push((void *)hwnd_of(w), hzit->second);
+    }
     std::set<DWORD> pids = collect_process_tree(g_pid);
     Find f{&pids, nullptr, 0};
     if (!pids.empty()) EnumWindows(find_window, (LPARAM)&f);
@@ -589,6 +632,7 @@ bool resume_game(SDL_Window *w) {
 }
 
 void launch_on_shutdown() {
+    display_refresh_override_pop();
     if (g_proc && g_tree_frozen) {
         set_tree_frozen(false);
         g_suspended = false;
@@ -734,6 +778,69 @@ struct PerfCache {
     PerfSummary sum;
 };
 static std::map<std::string, PerfCache> g_perf_cache;
+static std::map<std::string, std::vector<PerfPoint>> g_perf_hist;
+static std::string perf_history_path() { return config_dir() + "perf_history.ini"; }
+
+void perf_history_load() {
+    g_perf_hist.clear();
+    size_t n = 0;
+    char *d = (char *)SDL_LoadFile(perf_history_path().c_str(), &n);
+    if (!d) return;
+    std::string all(d, n);
+    SDL_free(d);
+    size_t at = 0;
+    while (at < all.size()) {
+        size_t end = all.find('\n', at);
+        if (end == std::string::npos) end = all.size();
+        std::string l = all.substr(at, end - at);
+        at = end + 1;
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        size_t eq = l.find('=');
+        if (eq == std::string::npos || l[0] == '#') continue;
+        std::string id = l.substr(0, eq), rest = l.substr(eq + 1);
+        auto &vec = g_perf_hist[id];
+        size_t p = 0;
+        while (p < rest.size()) {
+            size_t cm = rest.find(',', p);
+            if (cm == std::string::npos) cm = rest.size();
+            std::string tok = rest.substr(p, cm - p);
+            p = cm + 1;
+            long long ts = 0;
+            float avg = 0, lo = 0;
+            if (sscanf(tok.c_str(), "%lld:%f:%f", &ts, &avg, &lo) >= 2 && avg > 0.5f && avg < 1000.0f) {
+                vec.push_back({ts, avg, lo});
+            }
+        }
+        if (vec.size() > 12) vec.erase(vec.begin(), vec.end() - 12);
+    }
+}
+
+static void perf_history_record(const char *port_id, long long mtime_sec, float avg_fps, float low1_fps) {
+    if (demo_mode() || !port_id || !port_id[0] || avg_fps <= 0.5f) return;
+    auto &vec = g_perf_hist[port_id];
+    if (!vec.empty() && vec.back().ts == mtime_sec) return;
+    vec.push_back({mtime_sec, avg_fps, low1_fps});
+    if (vec.size() > 12) vec.erase(vec.begin(), vec.end() - 12);
+    std::string s = "# SteelTemple Sanctum: per-port session FPS history (ts:avg_fps:low1_fps)\n";
+    for (const auto &e : g_perf_hist) {
+        if (e.second.empty()) continue;
+        s += e.first + "=";
+        for (size_t i = 0; i < e.second.size(); ++i) {
+            char buf[64];
+            SDL_snprintf(buf, sizeof buf, "%s%lld:%.1f:%.1f", i ? "," : "", e.second[i].ts, e.second[i].avg_fps, e.second[i].low1_fps);
+            s += buf;
+        }
+        s += "\n";
+    }
+    std::string tmp = perf_history_path() + ".tmp";
+    if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), perf_history_path().c_str());
+}
+
+std::vector<PerfPoint> port_perf_history(const char *port_id) {
+    if (!port_id) return {};
+    auto it = g_perf_hist.find(port_id);
+    return it == g_perf_hist.end() ? std::vector<PerfPoint>{} : it->second;
+}
 
 PerfSummary port_last_perf(const Port &p, const Install &in) {
     std::string rel = port_log_rel(p);
@@ -766,6 +873,14 @@ PerfSummary port_last_perf(const Port &p, const Install &in) {
                     if (const char *lo = strstr(m, "1% low ")) ps.low1_fps = (float)atof(lo + 7);
                 }
             }
+        } else if (size_t vp = l.find("presents, "); vp != std::string::npos) {
+            // MasterSword periodic/final summary: "vk: 3240 presents, 54.9 fps;"
+            float avg = (float)atof(l.c_str() + vp + 10);
+            if (avg > 0.5f && avg < 1000.0f) {
+                ps.avg_fps = avg;
+                ps.valid = true;
+                ps.low1_fps = 0.0f;
+            }
         }
         // Optional error counters on boot/summary lines
         if (size_t ve = l.find("validation errors "); ve != std::string::npos)
@@ -780,6 +895,7 @@ PerfSummary port_last_perf(const Port &p, const Install &in) {
         else
             SDL_snprintf(buf, sizeof buf, "%.1f fps avg", ps.avg_fps);
         ps.text = buf;
+        perf_history_record(p.id, (long long)(pi.modify_time / 1000000000LL), ps.avg_fps, ps.low1_fps);
     }
     g_perf_cache[path] = {pi.size, pi.modify_time, ps};
     return ps;
@@ -1156,10 +1272,14 @@ void launch_poll(SDL_Window *w) {
     g_suspended = false;
     g_overlay_paused = false;
     g_tree_frozen = false;
+    hud_reset();
     perf_boost_game_stop();
+    display_refresh_override_pop();
     bool was_starting = g_starting;
     g_starting = false;
     if (secs >= 10) playtime_add(g_port, secs);
+    if (secs >= 5) sync_push_async(g_port, g_in);
+    else sync_invalidate(g_port >= 0 && g_port < (int)ports().size() ? ports()[g_port].id : nullptr);
     // back in front: restored (still fullscreen if it was), and given the foreground the game just let go of
     SDL_RestoreWindow(w);
     if (cfg().fullscreen && !getenv("SANCTUM_WINDOWED")) SDL_SetWindowFullscreen(w, true);

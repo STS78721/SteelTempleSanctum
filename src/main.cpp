@@ -46,6 +46,7 @@
 #include "selfupdate.h"
 #include "sound.h"
 #include "stb_image.h"   // implemented in covers.cpp
+#include "sync.h"
 #include "theme.h"
 
 namespace sanctum {
@@ -136,16 +137,23 @@ static bool sanctum_in_background(SDL_Window *win) {
 
 // what the workers finished, taken in every frame, and while a game runs too
 static void background_poll(SDL_Window *win) {
+    sound_poll();
     if (game_running() && input_poll_force_close(g_app.now)) {
         sanctum_log("force-close: controller chord held 2 s");
         overlay_close();
         close_game(true);
         toast("Force-closed game via controller chord", 3.5);
     }
-    if (game_running() && !launch_starting() && sanctum_in_background(win) && input_poll_guide_press(g_app.now)) {
+    if (input_poll_capture_press(g_app.now)) {
+        overlay_capture_screenshot(win);
+    }
+    if (game_running() && !launch_starting() && !overlay_win_is_interactive() && sanctum_in_background(win) &&
+        input_poll_guide_press(g_app.now)) {
         overlay_open_from_game(win);
     }
     launch_poll(win);
+    sync_poll();
+    overlay_sync_hud();
     install_poll(win);
     bool found = scan_poll();
     bool fresh = github_poll();
@@ -319,6 +327,7 @@ int main(int, char **) {
     catalog_load_cached();
     library_load();
     playtime_load();
+    perf_history_load();
     github_load_saved();
     version_probe_start();   // the saved copies' versions, from their programs
     if (!demo_mode()) scan_start();
@@ -332,7 +341,10 @@ int main(int, char **) {
         atexit([] { gamebar_override_set(false); });
     }
     perf_sync_idle();
-    atexit([] { perf_on_shutdown(); });
+    atexit([] {
+        display_refresh_override_pop();
+        perf_on_shutdown();
+    });
     self_update_start();   // Sanctum's own releases: a newer one downloads in the background
     whatsnew_check();
 
@@ -352,12 +364,71 @@ int main(int, char **) {
     if (cfg().fullscreen && !getenv("SANCTUM_WINDOWED")) SDL_SetWindowFullscreen(win, true);
     SDL_ShowWindow(win);
     if (cfg().hide_cursor) SDL_HideCursor();
-    Uint64 t0 = SDL_GetTicksNS(), last = t0;
+    Uint64 t0 = SDL_GetTicksNS(), last = t0, last_hud_render = 0;
     float dim_alpha = 0.0f;
     bool was_dimmed = false;
 
     for (int frame = 0; !a.quit; ++frame) {
-        // while a game runs Sanctum sleeps: no drawing, responsive polling for Guide overlay & force-close chord
+        // Lightweight transparent in-game overlay loop (Quick Overlay drawer, click-through screenshot toast, OR corner HUD pill)
+        if (game_running() && overlay_win_visible() &&
+            (overlay_win_is_interactive() || (SDL_GetWindowFlags(win) & SDL_WINDOW_MINIMIZED))) {
+            bool interactive = overlay_win_is_interactive();
+            a.mouse_moved = a.clicked = false;
+            a.typed.clear();
+            a.key_back = a.key_enter = a.key_escape = false;
+            a.now = (SDL_GetTicksNS() - t0) / 1e9;
+            SDL_Event e;
+            while (SDL_PollEvent(&e)) {
+                if (e.type == SDL_EVENT_QUIT) a.quit = true;
+                if (interactive) {
+                    overlay_win_event(e);
+                    input_event(e);
+                } else {
+                    input_bg_event(e, a.now);
+                }
+            }
+            Uint64 t = SDL_GetTicksNS();
+            a.now = (t - t0) / 1e9;
+            a.dt = (float)SDL_min((t - last) / 1e9, 0.1);
+            last = t;
+            if (interactive) {
+                input_frame();
+                if (frame >= 30 && (frame - 30) % 8 == 0 && (size_t)((frame - 30) / 8) < script.size())
+                    a.nav = script[(frame - 30) / 8];
+                if (a.nav == NAV_HOME) {
+                    overlay_toggle(win);
+                    a.nav = NAV_NONE;
+                }
+            } else if (frame >= 30 && (frame - 30) % 8 == 0 && (size_t)((frame - 30) / 8) < script.size()) {
+                Nav tn = script[(frame - 30) / 8];
+                if (tn == NAV_HOME && !launch_starting()) overlay_open_from_game(win);
+                else if (tn == NAV_PLUS && !launch_starting()) overlay_capture_screenshot(win);
+            }
+            background_poll(win);
+            bool fast_mode = overlay_win_is_interactive() || overlay_win_has_toast();
+            Uint64 now_ns = SDL_GetTicksNS();
+            if (overlay_win_visible() && (fast_mode || now_ns - last_hud_render >= 333000000ULL)) {
+                overlay_win_render(win, interactive ? a.nav : NAV_NONE, interactive ? a.clicked : false);
+                last_hud_render = fast_mode ? 0 : now_ns;
+            }
+            if (fast_mode) {
+                // Guard against 1000+ FPS spin if driver VSync doesn't wait on a locked desktop or VSync-off display
+                if (SDL_GetTicksNS() - t < 5000000ULL) SDL_Delay(8);
+            } else {
+                // HUD-only click-through mode: responsive 25 ms Guide/Capture polling with ~3 Hz HUD redraws
+                SDL_Event ev;
+                if (SDL_WaitEventTimeout(&ev, 25)) {
+                    auto handle_ev = [&](const SDL_Event &x) {
+                        if (x.type == SDL_EVENT_QUIT) a.quit = true;
+                        else input_bg_event(x, (SDL_GetTicksNS() - t0) / 1e9);
+                    };
+                    handle_ev(ev);
+                    while (SDL_PollEvent(&ev)) handle_ev(ev);
+                }
+            }
+            continue;
+        }
+        // while a game runs Sanctum sleeps: no drawing, responsive polling for Guide overlay, Capture, & force-close chord
         if (game_running() && (SDL_GetWindowFlags(win) & SDL_WINDOW_MINIMIZED)) {
             SDL_Event e;
             auto handle_bg_event = [&](const SDL_Event &ev) {
@@ -368,12 +439,18 @@ int main(int, char **) {
             if (SDL_WaitEventTimeout(&e, 25)) {
                 a.now = (SDL_GetTicksNS() - t0) / 1e9;
                 handle_bg_event(e);
-                // Drain remaining queued events (e.g. high-rate stick/gyro events) while still latching Guide presses
+                // Drain remaining queued events (e.g. high-rate stick/gyro events) while still latching Guide/Capture presses
                 while (SDL_PollEvent(&e)) handle_bg_event(e);
             } else {
                 a.now = (SDL_GetTicksNS() - t0) / 1e9;
             }
-            background_poll(win);   // downloads, search, GitHub, Guide overlay wakeup, and force-close chord
+            // Test hooks when sleeping behind a game: SANCTUM_NAV="... H ..." opens transparent overlay, "C" captures screenshot
+            if (frame >= 30 && (frame - 30) % 8 == 0 && (size_t)((frame - 30) / 8) < script.size()) {
+                Nav tn = script[(frame - 30) / 8];
+                if (tn == NAV_HOME && !launch_starting()) overlay_open_from_game(win);
+                else if (tn == NAV_PLUS && !launch_starting()) overlay_capture_screenshot(win);
+            }
+            background_poll(win);   // downloads, search, GitHub, Guide overlay wakeup, Capture, and force-close chord
             last = SDL_GetTicksNS();
             continue;
         }
@@ -496,6 +573,7 @@ int main(int, char **) {
         case SCR_PROFILE: profile_frame(); break;
         case SCR_MODS: mods_frame(); break;
         case SCR_ALBUM: album_frame(); break;
+        case SCR_LIBRARY: library_frame(); break;
         }
         if (trans_fade > 0.005f)
             dl()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, with_alpha(pal().bg, (int)(trans_fade * 165)));
@@ -603,6 +681,7 @@ int main(int, char **) {
 
     // a downloaded update goes in now, for the next start (a restart from About has put it in already)
     launch_on_shutdown();
+    overlay_shutdown();
     perf_on_shutdown();
     gamebar_override_set(false);
     cancel_prepare_shaders();

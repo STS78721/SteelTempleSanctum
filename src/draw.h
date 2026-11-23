@@ -25,8 +25,8 @@ std::string fit(float size, const std::string &s, float max_w);
 void rect(float x, float y, float w, float h, ImU32 col, float r = 0);
 void frame(float x, float y, float w, float h, ImU32 col, float r, float thick);
 void circle(float x, float y, float rad, ImU32 col);
-// the selection: a pulsing frame just outside (x, y, w, h)
-void focus_ring(float x, float y, float w, float h, float r, float pad = 7);
+// the selection: Switch 2 animated prismatic aurora (or chosen theme style) frame just outside (x, y, w, h)
+void focus_ring(float x, float y, float w, float h, float r, float pad = 7, ImU32 accent_override = 0);
 
 // a button as the pad in use prints it (A/B/X/Y in Xbox colours, Nintendo's plain letters, PlayStation's shapes)
 float glyph(Nav n, float x, float y, float size);   // returns its width
@@ -37,7 +37,7 @@ void status_bar(bool show_profile = true);
 
 enum Icon { IC_NEWS, IC_DOWNLOAD, IC_MODS, IC_PROFILE, IC_PAD, IC_GEAR, IC_POWER, IC_FOLDER, IC_PALETTE, IC_LIBRARY,
             IC_INFO, IC_PLAY, IC_SEARCH, IC_DRIVE, IC_UP, IC_CHECK, IC_DISPLAY, IC_SOUND, IC_PAUSE, IC_CLOSE, IC_STORE,
-            IC_ALBUM, IC_PIN, IC_STORAGE, IC_COPY };
+            IC_ALBUM, IC_PIN, IC_STORAGE, IC_COPY, IC_GRID };
 void icon(Icon i, float cx, float cy, float size, ImU32 col);
 
 // Handheld / laptop system battery (returns true on Legion Go / ROG Ally / laptops with a battery, false on desktops)

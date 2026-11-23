@@ -19,9 +19,14 @@ README = """SteelTemple Sanctum {v}
 Start SteelTemple-Sanctum.exe. Keep this folder together: the program needs its assets folder.
 Sanctum updates itself from GitHub (System Settings > About), and never downloads game files.
 
-Tip: Press the controller Guide / PS / Home button anytime (even in-game) to slide open
-Sanctum's Quick Overlay (Quick Suspend & Resume, System Volume, Close / Force Quit). If a game
-ever freezes, you can also hold Back + Start + L + R for 2 seconds to force-close it cleanly.
+Quick Tips:
+- Press Y / Triangle / Tab on any Home or Show more game tile to launch (or Quick Resume) directly.
+- Press the controller Guide / PS / Home button anytime (even in-game) to open the transparent
+  Quick Overlay (Quick Suspend & Resume, Take Screenshot, System Volume, Audio Output Switcher,
+  Performance HUD, Close / Force Quit).
+- Press your controller's Share / Create / Capture button (or F12 / PrtSc) to snap an instant
+  screenshot straight into Sanctum's Album.
+- Hold Back + Start + L + R for 2 seconds to force-close a frozen game cleanly.
 
 https://github.com/STS78721/SteelTempleSanctum
 """

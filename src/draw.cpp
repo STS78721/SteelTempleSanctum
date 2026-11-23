@@ -62,11 +62,179 @@ void frame(float x, float y, float w, float h, ImU32 col, float r, float t) {
 }
 void circle(float x, float y, float rad, ImU32 col) { dl()->AddCircleFilled(P(x, y), S(rad), col, 48); }
 
-void focus_ring(float x, float y, float w, float h, float r, float pad) {
-    float k = 0.5f + 0.5f * std::sin((float)app().now * 4.2f);
-    ImU32 c = pal().focus;
-    frame(x - pad - 3, y - pad - 3, w + 2 * pad + 6, h + 2 * pad + 6, with_alpha(c, (int)(40 + 50 * k)), r + pad + 3, 6);
-    frame(x - pad, y - pad, w + 2 * pad, h + 2 * pad, with_alpha(c, (int)(165 + 90 * k)), r + pad, 4.5f);
+static ImU32 sample_gradient_loop(const ImU32 *stops, int count, float u) {
+    u = u - std::floor(u);
+    if (u >= 1.0f) u = 0.0f;
+    float pos = u * (float)count;
+    int i0 = (int)pos % count;
+    if (i0 < 0) i0 += count;
+    int i1 = (i0 + 1) % count;
+    float f = pos - std::floor(pos);
+    // smoothstep blend for liquid glass color transitions
+    f = f * f * (3.0f - 2.0f * f);
+    return mix(stops[i0], stops[i1], f);
+}
+
+static ImU32 focus_ring_color(float u, float phase, float spec_phase, int style, bool light, ImU32 accent_override, float pulse) {
+    if (style == 3) {   // Classic Cyan
+        ImU32 base = pal().focus;
+        return mix(base, IM_COL32(235, 252, 255, 255), 0.22f * pulse);
+    }
+    if (style == 2) {   // Port Accent Glow
+        ImU32 acc = accent_override ? accent_override : pal().accent;
+        ImU32 hi = mix(acc, IM_COL32_WHITE, light ? 0.45f : 0.68f);
+        ImU32 deep = mix(acc, light ? IM_COL32(24, 28, 36, 255) : IM_COL32(18, 22, 32, 255), 0.30f);
+        ImU32 stops[4] = {hi, acc, deep, acc};
+        ImU32 c = sample_gradient_loop(stops, 4, u - phase);
+        float w = 0.5f + 0.5f * std::cos(6.2831853f * (u - spec_phase));
+        float spec = w * w * w * w * w * w;
+        return mix(c, IM_COL32_WHITE, (light ? 0.25f : 0.40f) * spec);
+    }
+    if (style == 1) {   // Rainbow Spectrum
+        static const ImU32 kRainDark[6] = {
+            IM_COL32(68, 242, 255, 255),   // cyan
+            IM_COL32(72, 236, 152, 255),   // emerald
+            IM_COL32(255, 222, 84, 255),   // gold
+            IM_COL32(255, 114, 96, 255),   // coral
+            IM_COL32(242, 108, 232, 255),  // magenta
+            IM_COL32(126, 118, 255, 255),  // violet
+        };
+        static const ImU32 kRainLight[6] = {
+            IM_COL32(0, 188, 218, 255),
+            IM_COL32(28, 192, 116, 255),
+            IM_COL32(232, 168, 18, 255),
+            IM_COL32(236, 72, 68, 255),
+            IM_COL32(212, 64, 198, 255),
+            IM_COL32(96, 82, 232, 255),
+        };
+        ImU32 c = sample_gradient_loop(light ? kRainLight : kRainDark, 6, u - phase);
+        float w = 0.5f + 0.5f * std::cos(6.2831853f * (u - spec_phase));
+        float spec = w * w * w * w * w * w;
+        return mix(c, IM_COL32(248, 255, 255, 255), (light ? 0.22f : 0.36f) * spec);
+    }
+    // Style 0: Aurora Prism
+    // Luminous mint-aqua -> sky cyan -> cobalt blue -> periwinkle indigo -> soft lavender -> pearl rose-pink
+    static const ImU32 kSw2Dark[6] = {
+        IM_COL32(181, 251, 249, 255),  // #B5FBF9 pearl mint-aqua
+        IM_COL32(82, 218, 255, 255),   // #52DAFF electric sky cyan
+        IM_COL32(43, 114, 234, 255),   // #2B72EA cobalt royal blue
+        IM_COL32(118, 98, 232, 255),   // #7662E8 periwinkle indigo
+        IM_COL32(202, 156, 232, 255),  // #CA9CE8 soft lavender violet
+        IM_COL32(251, 188, 230, 255),  // #FBBCE6 pearl rose-pink
+    };
+    static const ImU32 kSw2Light[6] = {
+        IM_COL32(0, 196, 206, 255),    // crisp aqua
+        IM_COL32(0, 148, 232, 255),    // sky blue
+        IM_COL32(40, 92, 224, 255),    // cobalt blue
+        IM_COL32(106, 76, 224, 255),   // periwinkle violet
+        IM_COL32(182, 92, 216, 255),   // orchid lavender
+        IM_COL32(236, 108, 184, 255),  // vibrant rose
+    };
+    ImU32 c = sample_gradient_loop(light ? kSw2Light : kSw2Dark, 6, u - phase);
+    // Subtle orbiting liquid-pearl specular glint along the rim (independently wrapped so it never skips)
+    float w = 0.5f + 0.5f * std::cos(6.2831853f * (u - spec_phase));
+    float spec = w * w * w * w * w * w * w * w;
+    return mix(c, IM_COL32(246, 255, 255, 255), (light ? 0.25f : 0.45f) * spec);
+}
+
+void focus_ring(float x, float y, float w, float h, float r, float pad, ImU32 accent_override) {
+    const Config &c = cfg();
+    int style = SDL_clamp(c.border_style, 0, 3);
+    int spd = SDL_clamp(c.border_speed, 0, 3);
+    static const float kSpeedMul[] = {0.0f, 0.14f, 0.30f, 0.56f};
+    double raw = app().now * (double)kSpeedMul[spd];
+    float phase = spd == 0 ? 0.12f : (float)std::fmod(raw, 1.0);
+    float spec_phase = spd == 0 ? 0.18f : (float)std::fmod(raw * 1.45, 1.0);
+    float pulse = spd == 0 ? 0.7f : (0.5f + 0.5f * std::sin((float)app().now * (spd == 1 ? 2.4f : spd == 3 ? 5.8f : 3.8f)));
+    bool light = pal().light;
+
+    float bx = x - pad, by = y - pad, bw = w + 2.0f * pad, bh = h + 2.0f * pad;
+    float br = std::min(r + pad, std::min(bw, bh) * 0.5f);
+    if (br < 1.0f) br = 1.0f;
+
+    struct PerimPt { float x, y, nx, ny, u; };
+    PerimPt pts[160];
+    int n = 0;
+    auto push_pt = [&](float px, float py, float nx, float ny) {
+        if (n < 160) pts[n++] = {px, py, nx, ny, 0.0f};
+    };
+    auto add_edge = [&](float x0, float y0, float x1, float y1, float nx, float ny) {
+        float len = std::hypot(x1 - x0, y1 - y0);
+        if (len < 6.0f) return;
+        int segs = std::min(12, std::max(1, (int)(len / 28.0f)));
+        for (int i = 1; i < segs; ++i) {
+            float t = (float)i / (float)segs;
+            push_pt(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, nx, ny);
+        }
+    };
+    auto add_arc = [&](float cx, float cy, float a0, float a1) {
+        const int segs = 10;
+        for (int i = 0; i <= segs; ++i) {
+            float a = a0 + (a1 - a0) * ((float)i / (float)segs);
+            float ca = std::cos(a), sa = std::sin(a);
+            push_pt(cx + br * ca, cy + br * sa, ca, sa);
+        }
+    };
+
+    const float kHalfPi = 1.57079633f;
+    // Top-right -> Right edge -> Bottom-right -> Bottom edge -> Bottom-left -> Left edge -> Top-left -> Top edge
+    add_arc(bx + bw - br, by + br, -kHalfPi, 0.0f);
+    add_edge(bx + bw, by + br, bx + bw, by + bh - br, 1.0f, 0.0f);
+    add_arc(bx + bw - br, by + bh - br, 0.0f, kHalfPi);
+    add_edge(bx + bw - br, by + bh, bx + br, by + bh, 0.0f, 1.0f);
+    add_arc(bx + br, by + bh - br, kHalfPi, 2.0f * kHalfPi);
+    add_edge(bx, by + bh - br, bx, by + br, -1.0f, 0.0f);
+    add_arc(bx + br, by + br, 2.0f * kHalfPi, 3.0f * kHalfPi);
+    add_edge(bx + br, by, bx + bw - br, by, 0.0f, -1.0f);
+    if (n < 4) return;
+
+    float total_len = 0.0f;
+    pts[0].u = 0.0f;
+    for (int i = 1; i < n; ++i) {
+        total_len += std::hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        pts[i].u = total_len;
+    }
+    total_len += std::hypot(pts[0].x - pts[n - 1].x, pts[0].y - pts[n - 1].y);
+    if (total_len < 1.0f) return;
+    for (int i = 0; i < n; ++i) pts[i].u /= total_len;
+
+    // 5 concentric rings per perimeter point:
+    //   0: inner AA (alpha 0) -> 1: inner core (255) -> 2: outer core (255)
+    //   -> 3: bloom base (soft glow) -> 4: outer bloom edge (alpha 0)
+    float half_core = (pad >= 6.0f) ? 2.15f : 1.75f;
+    float aa = 0.95f;
+    float bloom_w = (pad >= 6.0f) ? 8.5f : 6.0f;
+    int bloom_a = (int)((light ? 52.0f : 78.0f) + (light ? 16.0f : 26.0f) * pulse);
+    int core_a = style == 3 ? (int)(190.0f + 65.0f * pulse) : 255;
+
+    const float offs[5] = {-half_core - aa, -half_core, half_core, half_core + aa, half_core + aa + bloom_w};
+    const int alphas[5] = {0, core_a, core_a, bloom_a, 0};
+
+    ImDrawList *d = dl();
+    ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+    d->PrimReserve(n * 4 * 6, n * 5);
+    ImDrawIdx base = (ImDrawIdx)d->_VtxCurrentIdx;
+
+    for (int i = 0; i < n; ++i) {
+        ImU32 col = focus_ring_color(pts[i].u, phase, spec_phase, style, light, accent_override, pulse);
+        for (int k = 0; k < 5; ++k) {
+            ImVec2 pos = P(pts[i].x + pts[i].nx * offs[k], pts[i].y + pts[i].ny * offs[k]);
+            d->PrimWriteVtx(pos, uv, with_alpha(col, alphas[k]));
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        int j = (i + 1) % n;
+        ImDrawIdx a0 = (ImDrawIdx)(base + i * 5);
+        ImDrawIdx b0 = (ImDrawIdx)(base + j * 5);
+        for (int k = 0; k < 4; ++k) {
+            d->PrimWriteIdx((ImDrawIdx)(a0 + k));
+            d->PrimWriteIdx((ImDrawIdx)(b0 + k));
+            d->PrimWriteIdx((ImDrawIdx)(b0 + k + 1));
+            d->PrimWriteIdx((ImDrawIdx)(a0 + k));
+            d->PrimWriteIdx((ImDrawIdx)(b0 + k + 1));
+            d->PrimWriteIdx((ImDrawIdx)(a0 + k + 1));
+        }
+    }
 }
 
 // ---- button glyphs
@@ -387,6 +555,12 @@ void icon(Icon i, float cx, float cy, float s, ImU32 c) {
     case IC_COPY:    // overlapping sheets
         R(-0.3f, -0.72f, 0.72f, 0.3f, 0.1f);
         R(-0.72f, -0.3f, 0.3f, 0.72f, 0.1f);
+        break;
+    case IC_GRID:    // 2x2 rounded squares ("Show more" / All software)
+        R(-0.78f, -0.78f, -0.14f, -0.14f, 0.14f);
+        R(0.14f, -0.78f, 0.78f, -0.14f, 0.14f);
+        R(-0.78f, 0.14f, -0.14f, 0.78f, 0.14f);
+        R(0.14f, 0.14f, 0.78f, 0.78f, 0.14f);
         break;
     }
 }

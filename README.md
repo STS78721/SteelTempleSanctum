@@ -26,38 +26,48 @@ keep them up to date automatically, switch graphics presets, and start any game 
 
 ### 🏠 A home screen that feels like a console
 
-Your ports sit in one row — sorted by **Last played**, **Most played**, or **A to Z**, with **Pin to front** and a
-**Quick menu (`X`)** for one-press actions — each in its own colours. The round buttons below open **Releases & news**,
-**Get ports** (with an available-updates badge), **Downloads**, **Album**, **Mods**, **Controllers**, **System
-Settings** and **Power**. Sanctum opens fullscreen on your chosen monitor or TV with smooth transitions, hides the mouse
-pointer while you use a controller, and shows live **handheld/laptop and wireless controller battery indicators** in the
-status bar. Dark and Light themes, **12h/24h clock**, and **OLED Idle Dim** protection are built in.
+Your installed games sit in one sleek horizontal row — sorted by **Last played**, **Most played**, or **A to Z**, with
+the focused title hovering directly above its icon, **one-button direct Play / Quick Resume (`Y` / `△` / `Tab`)**,
+**Quick menu (`X`)**, and an animated **Aurora Prism** selection border with elastic tile motion. At the end of the row,
+**Show more** opens a full 6-column **All Games** library grid (with **All Games / Ports / Custom Games / Pinned** tabs,
+floating title tooltips, left filter/sort/add rail, and an inline **+ Add custom** tile). Below the row, the centered
+**Floating Pill** dock houses a featured **Get ports** button alongside **Downloads**, **Releases & news**, **Album**,
+**Mods**, **Controllers**, **System Settings**, and **Power**. Sanctum opens fullscreen on your chosen monitor or TV
+with optional **Start Sanctum with Windows (Console Mode)**, auto-hides the mouse pointer while using a controller, and
+shows live **handheld/laptop and wireless controller battery indicators**, **12h/24h clock**, and **OLED Idle Dim**
+protection.
 
 <div align="center">
 <img src="docs/screenshots/home-light.png" width="800" alt="Home in the Light theme">
 </div>
 
-### 🎮 Press Play, track last-run FPS, and recover from freezes on the couch
+### 🎮 Transparent In-Game Quick Overlay, Instant Screenshots & Performance HUD
 
-**Play** starts the game directly and skips the port's own launcher. Sanctum steps aside while you play and comes back
-when you quit, opening the game's page with a summary of how the run went.
+**Play** (or pressing **`Y` / `△` / `Tab`** straight from any tile) starts the game directly without opening the port's
+own launcher. Sanctum steps aside while you play and returns cleanly when you quit.
 
-- **Console-style Guide / Home Quick Overlay & Quick Suspend / Resume:** Press your controller's **Guide / Xbox / PS /
-  Switch Home button** (or the **`Home`** key) anytime — inside Sanctum **or while playing a game** — to slide open
-  Sanctum's right-side Quick Overlay. Adjust **Windows master volume** right from the couch, **Suspend game** (minimizes
-  and pauses the game's CPU, GPU, and audio cleanly with a **Quick Resume** badge on Home and the status bar, pausing
-  your play-time counter too), **Resume** right back on the exact frame, toggle Dark/Light theme or fullscreen, check
-  downloads & controller battery, or **Close / Force Quit** the running game in one press. While Sanctum is open, it
-  automatically and reversibly suppresses Windows' Xbox Game Bar controller button (restoring your exact Windows setting
-  when Sanctum closes).
-- **Last-session performance telemetry:** Each port's **TIME PLAYED** card shows per-profile play time, session count,
-  and your **last run's average FPS and 1% low** straight from the game's log.
-- **Couch-friendly freeze recovery:** If a game ever hangs or becomes unresponsive, press the **Guide / Home button** to
-  choose **Force quit game**, or hold **Back + Start + L + R** on your controller for **2 seconds** to force-close it
-  and jump straight back to Sanctum (no keyboard or Task Manager needed). If something crashed, the log and issue
-  reporter are one button away.
-- **Custom games & launch overrides:** Add any other PC `.exe` to your library, or set per-game **custom launch
-  arguments** and **environment variable overrides**.
+- **True Transparent In-Game Quick Overlay (`Guide` / `Xbox` / `PS` / `Home`):** Renders as a lightweight transparent
+  side panel directly over your live paused game frame (zero full-window switch flash). Adjust **Windows master volume**,
+  swap **Audio output** (HDMI TV, headphones, speakers) straight from your controller, toggle the **Performance HUD**,
+  take an instant screenshot, **Suspend game** (pauses CPU, GPU, audio, and play-time timer with a **Quick Resume**
+  badge), **Resume** right back on the exact frame, or **Close / Force Quit** in one press. Automatically and reversibly
+  suppresses Windows' Xbox Game Bar controller button while open.
+- **Share / Create / Capture Button → Instant Screenshot to Album:** Press your DualSense **Create**, **Capture**, or
+  Xbox **Share** button (or **`F12`** / **`PrtSc`** / Quick Overlay **Take screenshot**) to capture the live game window
+  straight into Sanctum's **Album** with a crisp shutter click and click-through corner toast.
+- **Zero-Inject Corner Performance HUD & Multi-Session FPS Sparkline:** Toggle an unobtrusive click-through corner pill
+  (**Off** / **Compact FPS** / **Detailed: FPS · CPU · GPU · RAM · Battery**) right from the Quick Overlay or System
+  Settings — zero DLL injection, works across every port and custom PC game — paired with a persistent multi-session
+  **FPS trend sparkline** inside each game's **TIME PLAYED** card.
+- **Per-Game Display Refresh Rate:** Optionally set a per-title display refresh rate (e.g. `60 Hz` or `120 Hz`, filtered
+  to your monitor's supported modes) in **Files & storage**; Sanctum switches cleanly for gameplay and restores your
+  desktop refresh rate automatically on exit or suspend.
+- **One-Click Sanitized Crash Diagnostics Bundle & Freeze Recovery:** Export a sanitized `.zip` bundle (`system.txt`
+  including GPU driver version, non-default `.ini` diff, and 64 KB log tail with personal usernames and local paths
+  stripped) right from a port's crash card or **Files & storage** for clean GitHub bug reports. If a game ever freezes,
+  press **Guide** → **Force quit game** or hold **Back + Start + L + R** for **2 seconds**.
+- **Custom PC games & launch overrides:** Add any PC `.exe` right from **Show more** or System Settings, or configure
+  per-game **custom launch arguments** and **environment variable overrides**.
 
 <div align="center">
 <img src="docs/screenshots/game.png" width="800" alt="A port's page: Play, version, TIME PLAYED card, and the copy that will start">
@@ -141,6 +151,10 @@ loading — completely zero-admin and 100% reversible:
 - **Shader & pipeline cache tools (`Files & storage`):** View the combined size of generated shader and Vulkan pipeline
   caches, clear stale caches safely to the Windows Recycle Bin in two presses (handy after GPU driver updates), or
   pre-warm seed shaders in the background on supported titles.
+- **Cloud-Folder Save Sync Bridge (`System Settings > Storage`):** Point Sanctum at any synced folder (OneDrive, Google
+  Drive, Syncthing, Dropbox, or a NAS share) to automatically mirror save snapshots after each play session, detect newer
+  saves from another PC or handheld (e.g., ROG Ally, Legion Go) with a **Cloud save newer** status chip, and pull updates
+  safely after backing up your existing local saves (`pre-sync-*.zip`).
 - **Save backups & restore:** Create timestamped **ZIP save backups** (pure C++, zero external tools) and restore either
   manual backups or automatic pre-update snapshots with a 2-press safety guard and pre-restore snapshot.
 - **Mod manager:** Open **Mods** from the Home dock or a port's **Mods** tab — or **drag and drop any `.zip` mod**
@@ -168,12 +182,19 @@ Tester**. Keyboard and mouse work everywhere too.
 <img src="docs/screenshots/controllers.png" width="800" alt="System Settings, Controllers: layout, icons, vibration, deadzone, force-close chord, and tester">
 </div>
 
-### 🔊 Console menu sounds & ambient audio
+### 🎨 Themes Studio, Animations & Tactile Menu Sounds
 
-Clean, tactile Switch 2–style UI sounds play as you navigate, toggle settings, type on the on-screen keyboard, or start
-a game, and pause automatically while a game runs. **System Settings > Sound** offers 3 built-in **Sound profiles**
-(**Switch 2 Crisp**, **Warm Retro**, **Soft Minimal**), **Volume** control, and optional **Home ambient audio** (a soft
-console hum or your own custom `.wav` track).
+**System Settings > Themes** brings appearance, focus-border animations, dock styling, and menu audio together into one
+customizable studio (with live preview right on the active highlight):
+
+- **Curated Theme Presets:** Switch in one press between **Sanctum Prism**, **Aqua Bubble**, **Port Accent**, and
+  **Clean Minimal**, or customize any element individually.
+- **Animated Selection Borders & Motion:** Choose **Aurora Prism**, **Spectrum Wave**, **Port Accent**, or **Classic
+  Cyan** focus borders with configurable animation speed (**Static**, **Calm**, **Standard**, **Lively**), tile motion
+  (**Off**, **Subtle**, **Elastic**), and Home dock style (**Floating Pill** or **Classic Circles**).
+- **Tactile Menu Audio:** Crisp procedural UI sound profiles (**Tactile Click**, **Bubble Pop**, **Warm Retro**, **Soft
+  Minimal**) with optional **Dynamic pitch & stereo pan** as you glide across icons, **Volume** control, and optional
+  **Home ambient audio** (soft console hum or custom `.wav`), pausing automatically while a game runs.
 
 <div align="center">
 <img src="docs/screenshots/sound.png" width="800" alt="System Settings, Sound: sound profiles, volume, and Home ambient audio">
@@ -225,13 +246,15 @@ includes optional, off-by-default **Discord Rich Presence**.
 
 | Action | Controller | Keyboard | Mouse |
 |---|---|---|---|
-| **Sanctum Quick Overlay (in Sanctum & in-game)** | **Press `Guide` / `Xbox` / `PS` / `Home`** | `Home` | Click outside to close |
+| **Sanctum Quick Overlay (transparent over live games)** | **Press `Guide` / `Xbox` / `PS` / `Home`** | `Home` | Click outside to close |
+| **Instant screenshot to Album** | **Press `Share` / `Create` / `Capture`** | `F12` / `PrtSc` | Quick Overlay → Take screenshot |
+| **Direct Play / Quick Resume from tile (Home & Show more)** | **`Y` (or `Triangle`)** | `Tab` | Hover Play button on tile |
 | **Force-close running / frozen game** | **Hold `Back + Start + L + R` (2 s)** | — | — |
 | Move / navigate | D-pad / Left stick | Arrow keys / `WASD` | Hover / Scroll wheel |
-| Confirm / Play | `A` (or `Cross`) | `Enter` / `Space` | Left click |
+| Open game / Confirm | `A` (or `Cross`) | `Enter` / `Space` | Left click |
 | Back / Cancel | `B` (or `Circle`) | `Esc` / `Backspace` | Right click / Mouse Back |
-| Quick menu (Home) / Quick Presets (Settings) / Install version (Release notes) / Switch package (Get ports) | `X` (or `Square`) | `X` | Click tile menu / preset pill |
-| Open on GitHub / Reset setting to default | `Y` (or `Triangle`) | `Y` / `Tab` | Click button |
+| Quick menu (Home) / Pin (Show more) / Quick Presets (Settings) / Install version (Release notes) | `X` (or `Square`) | `X` | Click tile menu / preset pill |
+| Open on GitHub (Game page) / Reset setting to default | `Y` (or `Triangle`) | `Y` / `Tab` | Click button |
 | Switch tabs or settings pages | `L` / `R` (`LB` / `RB`) | `Q` / `E` (`PgUp` / `PgDn`) | Click a tab |
 | Check GitHub for updates & new ports | `+` (`Menu` / `Options`) | `F5` / `=` | — |
 | Secondary / sort action | `−` (`View` / `Share`) | `F1` / `-` | Click sort chip |

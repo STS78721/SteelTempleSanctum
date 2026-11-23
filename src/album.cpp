@@ -16,6 +16,7 @@
 #include "config.h"
 #include "covers.h"
 #include "draw.h"
+#include "github.h"
 #include "platform.h"
 #include "sound.h"
 
@@ -165,6 +166,16 @@ static void album_scan() {
     if (demo_mode()) return;
 
     std::set<std::string> seen;
+    // Sanctum's own instant-capture Album directory (%LOCALAPPDATA%\SteelTemple\Sanctum\screenshots\<port_id>\)
+    {
+        std::string own = local_dir() + "screenshots";
+        if (SDL_GetPathInfo(own.c_str(), nullptr)) {
+            for (const Port &p : ports())
+                collect_dir(own + "\\" + p.id, p.name, g_photos, seen, 1);
+            collect_dir(own + "\\sanctum", "Sanctum", g_photos, seen, 1);
+            collect_dir(own, "Sanctum", g_photos, seen, 0);
+        }
+    }
     for (const Port &p : ports()) {
         const Install *in = p.best();
         if (!in) continue;
@@ -196,6 +207,38 @@ static void album_scan() {
 }
 
 void album_init(SDL_Renderer *r) { g_ren = r; }
+
+std::string album_take_screenshot(void *target_hwnd, int port_idx, bool allow_print_window) {
+    if (demo_mode()) return {};
+    std::string sub = "sanctum";
+    if (port_idx >= 0 && port_idx < (int)ports().size()) sub = ports()[port_idx].id;
+    std::string root = local_dir() + "screenshots";
+    std::string dir = root + "\\" + sub;
+    SDL_CreateDirectory(root.c_str());
+    SDL_CreateDirectory(dir.c_str());
+
+    time_t now = time(nullptr);
+    struct tm lt{};
+#ifdef _WIN32
+    localtime_s(&lt, &now);
+#else
+    localtime_r(&lt, &now);
+#endif
+    char stamp[32];
+    strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &lt);
+    std::string base = dir + "\\" + sub + "-" + stamp;
+    std::string dst = base + ".png";
+    for (int k = 1; k < 20 && SDL_GetPathInfo(dst.c_str(), nullptr); ++k)
+        dst = base + "-" + std::to_string(k) + ".png";
+
+    int w = 0, h = 0;
+    if (!capture_screenshot_png(target_hwnd, dst, &w, &h, allow_print_window)) {
+        sanctum_log("album: screenshot capture failed (dst=%s)", dst.c_str());
+        return {};
+    }
+    sanctum_log("album: captured screenshot %s (%dx%d)", dst.c_str(), w, h);
+    return dst;
+}
 
 void album_open() {
     album_scan();
