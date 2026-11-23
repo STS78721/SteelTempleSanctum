@@ -1,0 +1,466 @@
+{
+ "port": "yatmb",
+ "ini": "yatmb.ini",
+ "prefix": "NS2_",
+ "read_from": "882ee75 (2026-11-23, Add Yoshi and the Mysterious Book PC (0.1.0) runtime, shader fixes, Se)",
+ "pages": [
+  {
+   "title": "Display",
+   "rows": [
+    {
+     "label": "Console mode",
+     "type": "choice",
+     "names": [
+      "Docked",
+      "Handheld"
+     ],
+     "desc": "Plays the game as on a docked Switch 2 (TV) or in handheld mode. The game picks its own resolution and detail for each mode.",
+     "key": "OPERATION_MODE",
+     "ini": "operation_mode",
+     "section": "display",
+     "default": "docked",
+     "live": true,
+     "values": [
+      "docked",
+      "handheld"
+     ]
+    },
+    {
+     "label": "Fullscreen",
+     "type": "toggle",
+     "desc": "Fills the screen with the game; F11 toggles it.",
+     "inverted": false,
+     "key": "FULLSCREEN",
+     "ini": "fullscreen",
+     "section": "display",
+     "default": "0",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Presentation",
+     "type": "choice",
+     "names": [
+      "Mailbox",
+      "VSync",
+      "Immediate"
+     ],
+     "desc": "How finished frames reach the screen.",
+     "key": "VK_PRESENT",
+     "ini": "vk_present",
+     "section": "display",
+     "default": "mailbox",
+     "live": true,
+     "values": [
+      "mailbox",
+      "fifo",
+      "immediate"
+     ]
+    },
+    {
+     "label": "Performance overlay",
+     "type": "choice",
+     "names": [
+      "Off",
+      "FPS",
+      "Full"
+     ],
+     "desc": "Frame rate in the top right corner. Full adds frame times with a graph, CPU, GPU and memory load, temperatures and the render thread's waits. F10 cycles the modes.",
+     "key": "PERF_OVERLAY",
+     "ini": "perf_overlay",
+     "section": "display",
+     "default": "off",
+     "live": true,
+     "values": [
+      "off",
+      "fps",
+      "full"
+     ]
+    },
+    {
+     "type": "group",
+     "label": "Colour"
+    },
+    {
+     "label": "Colour profile",
+     "type": "choice",
+     "names": [
+      "Game's own",
+      "Vivid (OLED)",
+      "Clarity",
+      "Custom"
+     ],
+     "desc": "Sets the four values below. Vivid: more contrast and saturation, shadows opened a little (made for OLED screens). Clarity: a little more contrast, saturation and brightness. Moving a value makes the profile Custom. The HUD changes with the picture; this menu does not.",
+     "key": "COLOR_PRESET",
+     "ini": "color_preset",
+     "section": "display",
+     "default": "default",
+     "live": true,
+     "values": [
+      "default",
+      "vivid",
+      "clarity",
+      "custom"
+     ]
+    },
+    {
+     "label": "Brightness",
+     "type": "slider",
+     "lo": -30.0,
+     "hi": 30.0,
+     "desc": "Added to every colour; 0 leaves it.",
+     "step": 1.0,
+     "fmt": "%+.0f %%",
+     "key": "COLOR_BRIGHTNESS",
+     "ini": "color_brightness",
+     "section": "display",
+     "default": "0",
+     "live": true
+    },
+    {
+     "label": "Contrast",
+     "type": "slider",
+     "lo": 70.0,
+     "hi": 150.0,
+     "desc": "Spreads colours away from mid-grey (above 100 %) or towards it; 100 % leaves them.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "COLOR_CONTRAST",
+     "ini": "color_contrast",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Saturation",
+     "type": "slider",
+     "lo": 50.0,
+     "hi": 200.0,
+     "desc": "Colour strength against grey; 100 % leaves it.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "COLOR_SATURATION",
+     "ini": "color_saturation",
+     "section": "display",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Gamma",
+     "type": "slider",
+     "lo": 0.8,
+     "hi": 1.2,
+     "desc": "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+     "step": 0.02,
+     "fmt": "%.2f",
+     "key": "COLOR_GAMMA",
+     "ini": "color_gamma",
+     "section": "display",
+     "default": "1",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "Graphics",
+   "rows": [
+    {
+     "label": "Internal resolution",
+     "type": "choice",
+     "values": [
+      "original",
+      "720",
+      "900",
+      "1080",
+      "1440",
+      "2160"
+     ],
+     "names": [
+      "Original",
+      "720p",
+      "900p",
+      "1080p",
+      "1440p",
+      "2160p (4K)"
+     ],
+     "desc": "Internal frame size (3D and HUD). Original uses the console tier. Higher values turn off dynamic shrink where supported. Restart.",
+     "key": "RESOLUTION",
+     "ini": "resolution",
+     "section": "graphics",
+     "default": "original",
+     "live": false
+    },
+    {
+     "label": "Anisotropic filtering",
+     "type": "choice",
+     "values": [
+      "game",
+      "2",
+      "4",
+      "8",
+      "16"
+     ],
+     "names": [
+      "Game",
+      "2x",
+      "4x",
+      "8x",
+      "16x"
+     ],
+     "desc": "Minimum anisotropy on mipmapped textures (ground, lines, terrain). Game keeps the title's own setting; 8 / 16 restore angled detail lost at distance. Restart.",
+     "key": "ANISO",
+     "ini": "aniso",
+     "section": "graphics",
+     "default": "16",
+     "live": false
+    },
+    {
+     "label": "Scaling to the window",
+     "type": "choice",
+     "values": [
+      "fsr",
+      "bilinear",
+      "off"
+     ],
+     "names": [
+      "AMD FSR 1.0",
+      "Bilinear",
+      "Off"
+     ],
+     "desc": "How the picture is scaled when the window is larger than the game resolution. FSR keeps edges and detail sharper than bilinear.",
+     "key": "UPSCALER",
+     "ini": "upscaler",
+     "section": "display",
+     "default": "fsr",
+     "live": true
+    },
+    {
+     "label": "FSR sharpness",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Sharpening after FSR scaling; 0 turns it off.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "SHARPNESS",
+     "ini": "sharpness",
+     "section": "display",
+     "default": "80",
+     "live": true
+    },
+    {
+     "label": "Frame Generation",
+     "type": "choice",
+     "values": [
+      "off",
+      "msm_fg",
+      "fsr3_fg",
+      "xefg"
+     ],
+     "names": [
+      "Off",
+      "Nodix SMFG",
+      "AMD FSR 3 FG",
+      "Intel XeFG"
+     ],
+     "desc": "Generates interpolated frames between rendered frames to multiply smoothness. Intel XeSS MFG, AMD FSR 3.1 FG, and Nodix MSM-FG provide GPU compute motion interpolation across hardware.",
+     "key": "FG_MODE",
+     "ini": "fg_mode",
+     "section": "display",
+     "default": "off",
+     "live": true
+    },
+    {
+     "label": "Frame Gen multiplier",
+     "type": "choice",
+     "values": [
+      "2x",
+      "3x",
+      "4x"
+     ],
+     "names": [
+      "2x",
+      "3x",
+      "4x"
+     ],
+     "desc": "Number of presented frames per rendered frame. 2x and 3x are universally supported across all Super Motion modes, and 4x/6x are supported via compute on modern GPUs.",
+     "key": "FG_MULT",
+     "ini": "fg_mult",
+     "section": "display",
+     "default": "2x",
+     "live": true
+    },
+    {
+     "label": "Low-latency mode",
+     "type": "choice",
+     "values": [
+      "auto",
+      "boost",
+      "on",
+      "off"
+     ],
+     "names": [
+      "Automatic",
+      "On + Boost",
+      "On",
+      "Off"
+     ],
+     "desc": "Reduces render queue latency with NVIDIA Reflex, AMD Anti-Lag 2, or Intel XeLL.",
+     "key": "LOW_LATENCY",
+     "ini": "low_latency",
+     "section": "display",
+     "default": "boost",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "Sound",
+   "rows": [
+    {
+     "label": "Volume",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 100.0,
+     "desc": "Master volume of the game.",
+     "step": 5.0,
+     "fmt": "%.0f %%",
+     "key": "VOLUME",
+     "ini": "volume",
+     "section": "audio",
+     "default": "100",
+     "live": true
+    },
+    {
+     "label": "Audio channel format",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Stereo (2.0)",
+      "Surround (5.1)"
+     ],
+     "desc": "Speaker surround sound topology: Stereo, 5.1 Surround, or Auto-detect.",
+     "key": "AUDIO_CHANNELS",
+     "ini": "audio_channels",
+     "section": "audio",
+     "default": "stereo",
+     "live": false,
+     "values": [
+      "auto",
+      "stereo",
+      "5.1"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Controls",
+   "rows": [
+    {
+     "label": "Button layout",
+     "type": "choice",
+     "names": [
+      "Automatic",
+      "Nintendo (A right)",
+      "Xbox (A bottom)",
+      "Xbox prompts (A right)"
+     ],
+     "desc": "Which button is A. Nintendo: the right one, as on a Switch. Xbox: the bottom one, as labelled on an Xbox controller (cross on a PlayStation controller). Automatic picks Nintendo for controllers with Nintendo labels and Xbox for the others. Xbox prompts: A is the right one as with Nintendo, and the game shows the Xbox labels (B for A, A for B, Y for X, X for Y); the prompts change after a restart. The letters are part of the game's files, so a button you remap in Controls keeps the old letter on screen.",
+     "key": "PAD_LAYOUT",
+     "ini": "pad_layout",
+     "section": "input",
+     "default": "auto",
+     "live": true,
+     "values": [
+      "auto",
+      "nintendo",
+      "xbox",
+      "xbox_prompts"
+     ]
+    },
+    {
+     "label": "Motion controls",
+     "type": "toggle",
+     "desc": "Aiming with the controller's gyroscope.",
+     "inverted": false,
+     "key": "MOTION",
+     "ini": "motion",
+     "section": "input",
+     "default": "1",
+     "live": true,
+     "values": [
+      "0",
+      "1"
+     ]
+    },
+    {
+     "label": "Stick dead zone",
+     "type": "slider",
+     "lo": 0.0,
+     "hi": 50.0,
+     "desc": "How far a gamepad stick moves before the game sees it. Raise it if the character or the camera moves on its own.",
+     "step": 1.0,
+     "fmt": "%.0f %%",
+     "key": "STICK_DEADZONE",
+     "ini": "stick_deadzone",
+     "section": "input",
+     "default": "8",
+     "live": true
+    }
+   ]
+  },
+  {
+   "title": "System",
+   "rows": [
+    {
+     "label": "Menu language",
+     "type": "choice",
+     "names": [
+      "Automatic (from Windows)",
+      "English",
+      "Русский"
+     ],
+     "desc": "Language of this menu and the overlay.",
+     "key": "MENU_LANG",
+     "ini": "menu_lang",
+     "section": "language",
+     "default": "",
+     "live": true,
+     "values": [
+      "",
+      "en",
+      "ru"
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Advanced",
+   "rows": [
+    {
+     "label": "GPU memory mode",
+     "type": "choice",
+     "values": [
+      "auto",
+      "import",
+      "mirror"
+     ],
+     "names": [
+      "Automatic",
+      "Import (recommended)",
+      "Mirror"
+     ],
+     "desc": "How the GPU reads the game's memory. Import is fastest on discrete GPUs; Mirror copies modified ranges.",
+     "key": "MEMORY",
+     "ini": "memory",
+     "section": "performance",
+     "default": "auto",
+     "live": false
+    }
+   ]
+  }
+ ]
+}

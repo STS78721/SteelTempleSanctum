@@ -391,7 +391,19 @@ void install_poll(SDL_Window *w) {
             for (auto &in : p.all)
                 if (in.dir == f.dir && in.registered) registry_version(p.uninstall_key, f.version);
         catalog_installed(f.port, f.dir, f.version);
-        toast(std::string(p.name) + (f.kind == JOB_UPDATE ? " updated to " : " installed: ") + f.version, 3.5);
+        bool needs_relink = false;
+        if (f.kind == JOB_UPDATE && p.launcher && p.exe) {
+            std::string stem = p.exe;
+            if (size_t dot = stem.rfind('.'); dot != std::string::npos) stem.resize(dot);
+            SDL_PathInfo rt{}, ex{};
+            if (SDL_GetPathInfo((f.dir + "\\runtime\\lib" + stem + "rt.a").c_str(), &rt) &&
+                SDL_GetPathInfo((f.dir + "\\" + p.exe).c_str(), &ex) && rt.modify_time > ex.modify_time)
+                needs_relink = true;
+        }
+        if (needs_relink)
+            toast(std::string(p.name) + " updated to " + f.version + " — open Port's own launcher once to relink " + p.exe, 5.0);
+        else
+            toast(std::string(p.name) + (f.kind == JOB_UPDATE ? " updated to " : " installed: ") + f.version, 3.5);
     }
 }
 

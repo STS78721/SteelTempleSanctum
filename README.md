@@ -171,6 +171,7 @@ includes optional, off-by-default **Discord Rich Presence**.
 | Mario Tennis Fever | **ShadowRacket** | [STS78721/MTF-ShadowRacket](https://github.com/STS78721/MTF-ShadowRacket) |
 | Donkey Kong Bananza | **dkb-BANANAS** | [STS78721/dkb-BANANAS](https://github.com/STS78721/dkb-BANANAS) |
 | Super Mario Bros. Wonder | **WonderBloom** | [STS78721/SMBWONDERBLOOM](https://github.com/STS78721/SMBWONDERBLOOM) |
+| Yoshi and the Mysterious Book | **YATMB** | [STS78721/YATMB](https://github.com/STS78721/YATMB) |
 
 New releases of these ports show up in Sanctum by themselves. Press **+** (Menu / Options) to check right away.
 

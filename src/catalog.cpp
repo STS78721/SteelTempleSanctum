@@ -31,10 +31,11 @@ static std::vector<Port> g_ports = {
     {"totk", "The Legend of Zelda: Tears of the Kingdom", "TotK SteelTempleBuild", "STS78721/totk-pc-recomp-SteelTempleBuild",
      "Beta-6.3", "97 MB", "tearsofthekingdom", "TotK", "totk.exe", nullptr, "TotKLauncher.exe", nullptr,
      {IM_COL32(31, 143, 134, 255), IM_COL32(59, 42, 16, 255)}},
-    {"slowseparation", "Fast Fusion", "SlowSeparation", "STS78721/SlowSeparation", "Alpha-0.1.2a", "158 MB", "fastfusion",
-     "FF", "ff.exe", nullptr, "FFLauncher.exe", nullptr, {IM_COL32(255, 46, 136, 255), IM_COL32(15, 13, 34, 255)}},
-    {"shadowracket", "Mario Tennis Fever", "ShadowRacket", "STS78721/MTF-ShadowRacket", "Alpha-0.1.3b", "156 MB",
-     "mariotennisfever", "MTF", "mtf.exe", nullptr, "MTFLauncher.exe", nullptr,
+    {"slowseparation", "Fast Fusion", "SlowSeparation", "STS78721/SlowSeparation", "Alpha-0.1.2c", "158 MB", "fastfusion",
+     "FF", "ff.exe", nullptr, "FFLauncher.exe", "FF-SlowSeparation",
+     {IM_COL32(255, 46, 136, 255), IM_COL32(15, 13, 34, 255)}},
+    {"shadowracket", "Mario Tennis Fever", "ShadowRacket", "STS78721/MTF-ShadowRacket", "Alpha-0.1.4", "156 MB",
+     "mariotennisfever", "MTF", "mtf.exe", nullptr, "MTFLauncher.exe", "MTF-ShadowRacket",
      {IM_COL32(204, 242, 42, 255), IM_COL32(18, 36, 24, 255)}},
     {"dkb-bananas", "Donkey Kong Bananza", "dkb-BANANAS", "STS78721/dkb-BANANAS", "Alpha-1g", "321 MB",
      "donkeykongbananza", "DKB", "dkb.exe", nullptr, "DKBLauncher.exe", nullptr,
@@ -43,6 +44,9 @@ static std::vector<Port> g_ports = {
     {"wonderbloom", "Super Mario Bros. Wonder", "WonderBloom", "STS78721/SMBWONDERBLOOM", "0.2.1", "143 MB",
      "supermariobroswonder", "SMBW", "smbw.exe", nullptr, nullptr, nullptr,
      {IM_COL32(156, 72, 232, 255), IM_COL32(38, 16, 72, 255)}},
+    {"yatmb", "Yoshi and the Mysterious Book", "YATMB", "STS78721/YATMB", "0.1.0", "156 MB",
+     "yoshiandthemysteriousbook", "YATMB", "yatmb.exe", nullptr, "YATMBLauncher.exe", "YATMB",
+     {IM_COL32(96, 226, 68, 255), IM_COL32(14, 38, 22, 255)}},
 };
 
 static const int kBuiltinCount = (int)g_ports.size();
@@ -62,7 +66,7 @@ static void custom_games_save();
 static void library_save();
 static bool exists(const std::string &p);
 static void refilter();
-static void rank(std::vector<Install> &v);
+static void rank(const Port &p, std::vector<Install> &v);
 static void apply_known_versions(const Port &p, std::vector<Install> &v);
 static bool version_newer(const std::string &a, const std::string &b);
 
@@ -156,7 +160,7 @@ int catalog_add_folder(const std::string &dir) {
             p.all.push_back(std::move(in));
         }
         apply_known_versions(p, p.all);
-        rank(p.all);
+        rank(p, p.all);
         if (p.installs.empty()) cfg().prefer[p.id] = clean;
         ++added;
     }
@@ -253,12 +257,14 @@ static bool version_newer(const std::string &a, const std::string &b) {
     return a.size() - i > b.size() - j;   // "0.2.2c" / "0.2.2.b" after "0.2.2"
 }
 
-// best first: a Setup Wizard's install, a player's copy before a build folder, the newest version (an unknown one
-// last), one with its launcher, then the shortest path
-static void rank(std::vector<Install> &v) {
-    std::stable_sort(v.begin(), v.end(), [](const Install &a, const Install &b) {
+// best first: a Setup Wizard's install, a player's copy before a build folder, a playable copy (has the game exe)
+// before a launcher-only folder, the newest version (an unknown one last), one with its launcher, then shortest path
+static void rank(const Port &p, std::vector<Install> &v) {
+    std::stable_sort(v.begin(), v.end(), [&](const Install &a, const Install &b) {
         if (a.registered != b.registered) return a.registered;
         if (a.dev != b.dev) return !a.dev;
+        bool ra = port_ready(p, a), rb = port_ready(p, b);
+        if (ra != rb) return ra;
         if (a.version.empty() != b.version.empty()) return !a.version.empty();
         if (tag_key(a.version) != tag_key(b.version)) return version_newer(a.version, b.version);
         if (a.launcher != b.launcher) return a.launcher;
@@ -319,10 +325,16 @@ static std::string companion_dll(const std::string &dir, const char *id, const c
 static std::string read_version(const std::string &dir, const char *exe) {
     std::vector<std::string> files;
     std::string stem = exe_stem_of(exe);
-    if (!stem.empty()) files.push_back(stem + "_version.txt");
+    if (!stem.empty()) {
+        files.push_back(stem + "_version.txt");
+        files.push_back("launcher\\" + stem + "_version.txt");
+    }
     files.push_back("VERSION");
     files.push_back("launcher\\version.txt");
     files.push_back("version.txt");
+    size_t sl = dir.find_last_of("\\/");
+    if (sl != std::string::npos && lower(dir.substr(sl + 1)) == "dist" && !stem.empty())
+        files.push_back("..\\launcher\\" + stem + "_version.txt");
     for (const std::string &f : files) {
         size_t n = 0;
         char *d = (char *)SDL_LoadFile((dir + "\\" + f).c_str(), &n);
@@ -474,9 +486,9 @@ static int search(void *) {
         walk(root, 6, out);
     }
 #endif
-    for (auto &v : out) {
-        for (Install &in : v) in.dev = !in.registered && is_dev_path(in.dir);
-        rank(v);
+    for (size_t i = 0; i < out.size(); ++i) {
+        for (Install &in : out[i]) in.dev = !in.registered && is_dev_path(in.dir);
+        rank(g_ports[i], out[i]);
     }
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -712,7 +724,7 @@ void library_load() {
         }
         for (int i = 0; i < kBuiltinCount; ++i) {   // the versions read last time, from the first frame on
             apply_known_versions(g_ports[i], g_ports[i].all);
-            rank(g_ports[i].all);
+            rank(g_ports[i], g_ports[i].all);
         }
     }
     custom_games_load();
@@ -766,15 +778,15 @@ static void probe_cache_load() {
         size_t eq = l.rfind('=');
         if (eq == std::string::npos || l.empty() || l[0] == '#') continue;
         std::string k = l.substr(0, eq);
-        // Drop legacy v1/v2 entries (without |v3|): v3 also tracks companion renderer DLLs (e.g. mastersword_vk.dll)
-        if (k.find("|v3|") == std::string::npos) continue;
+        // Drop legacy entries (without |v4|): v4 reads PE .rdata/.data directly and accepts git-describe tag suffixes
+        if (k.find("|v4|") == std::string::npos) continue;
         g_probe_cache[k] = l.substr(eq + 1);
     }
 }
 
 static void probe_cache_save() {
     if (demo_mode()) return;
-    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>|v3|<tags>=<version>)\n";
+    std::string s = "# SteelTemple Sanctum: versions read from game programs (<program>|<size>|<time>|v4|<tags>=<version>)\n";
     for (auto &e : g_probe_cache) s += e.first + "=" + e.second + "\n";
     std::string tmp = probe_cache_path() + ".tmp";
     if (SDL_SaveFile(tmp.c_str(), s.data(), s.size())) SDL_RenamePath(tmp.c_str(), probe_cache_path().c_str());
@@ -787,7 +799,7 @@ static std::string probe_prefix(const std::string &exe, const std::string &dll =
     SDL_PathInfo di;
     if (!dll.empty() && SDL_GetPathInfo(dll.c_str(), &di))
         s += "+" + std::to_string(di.size) + ":" + std::to_string(di.modify_time);
-    return s + "|v3|";
+    return s + "|v4|";
 }
 
 static bool valid_ver(const std::string &s) {
@@ -863,6 +875,43 @@ static std::string probe_direct_chunk(const char *buf, size_t len, const std::st
     return {};
 }
 
+// Parse PE section headers so version probing reads only .rdata/.data/.rodata (~2-19 MB instead of 100-574 MB .text).
+static std::vector<std::pair<Uint64, Uint64>> pe_data_ranges(SDL_IOStream *io) {
+    std::vector<std::pair<Uint64, Uint64>> ranges;
+    unsigned char hdr[4096];
+    size_t got = SDL_ReadIO(io, hdr, sizeof hdr);
+    auto u16 = [&](size_t o) -> Uint32 { return hdr[o] | ((Uint32)hdr[o + 1] << 8); };
+    auto u32 = [&](size_t o) -> Uint32 {
+        return hdr[o] | ((Uint32)hdr[o + 1] << 8) | ((Uint32)hdr[o + 2] << 16) | ((Uint32)hdr[o + 3] << 24);
+    };
+    if (got < 0x40 || hdr[0] != 'M' || hdr[1] != 'Z') return ranges;
+    Uint32 pe = u32(0x3c);
+    if (pe + 24 > got || hdr[pe] != 'P' || hdr[pe + 1] != 'E' || hdr[pe + 2] != 0 || hdr[pe + 3] != 0) return ranges;
+    Uint32 nsec = u16(pe + 6), opt = u16(pe + 20);
+    size_t off = (size_t)pe + 24 + opt;
+    if (nsec == 0 || nsec > 96 || off + (size_t)nsec * 40 > got) return ranges;
+    for (Uint32 i = 0; i < nsec; ++i) {
+        size_t s = off + (size_t)i * 40;
+        std::string name((const char *)&hdr[s], strnlen((const char *)&hdr[s], 8));
+        Uint32 rsz = u32(s + 16), rptr = u32(s + 20);
+        if (rsz == 0 || rptr == 0) continue;
+        if (name == ".rdata" || name == ".data" || name == ".rodata") ranges.push_back({rptr, rsz});
+    }
+    return ranges;
+}
+
+static bool is_git_describe_tail(const char *buf, size_t len, size_t pos) {
+    // Matches "-<digits>-g<4+ hex>" (e.g. "0.2.3b-1-gfd24a6f-dirty")
+    if (pos + 7 >= len || buf[pos] != '-') return false;
+    size_t p = pos + 1;
+    if (!SDL_isdigit((unsigned char)buf[p])) return false;
+    while (p < len && SDL_isdigit((unsigned char)buf[p])) ++p;
+    if (p + 5 >= len || buf[p] != '-' || buf[p + 1] != 'g') return false;
+    size_t h0 = p + 2, h = h0;
+    while (h < len && SDL_isxdigit((unsigned char)buf[h])) ++h;
+    return h - h0 >= 4;
+}
+
 static std::string probe_binary(const std::string &path, const ProbeJob &j) {
     // every spelling: as tagged, '-' as ' ' ("Alpha-0.1.1" / "Alpha 0.1.1"), and with a leading v
     std::vector<std::pair<std::string, int>> pats;   // (text, tag index)
@@ -874,39 +923,52 @@ static std::string probe_binary(const std::string &path, const ProbeJob &j) {
     }
     SDL_IOStream *io = SDL_IOFromFile(path.c_str(), "rb");
     if (!io) return {};
+    std::vector<std::pair<Uint64, Uint64>> ranges = pe_data_ranges(io);
+    if (ranges.empty()) {
+        Sint64 sz = SDL_GetIOSize(io);
+        if (sz > 0) ranges.push_back({0, (Uint64)sz});
+    }
     const size_t chunk = 8 << 20, keep = 256;
     std::vector<char> buf(chunk + keep);
-    size_t have = 0;
     int best = (int)j.tags.size();
     std::string direct;
     auto clean = [](char c) { return !SDL_isalnum((unsigned char)c) && c != '.' && c != '-'; };
-    for (;;) {
-        size_t got = SDL_ReadIO(io, buf.data() + have, chunk);
-        size_t len = have + got;
-        if (direct.empty()) direct = probe_direct_chunk(buf.data(), len, j.id, j.exe_stem, j.title);
-        if (direct.empty()) {
-            for (auto &p : pats) {
-                if (p.second >= best) continue;
-                const std::string &s = p.first;
-                auto it = buf.begin(), end = buf.begin() + len;
-                std::boyer_moore_horspool_searcher<std::string::const_iterator> bm(s.begin(), s.end());
-                while ((it = std::search(it, end, bm)) != end) {
-                    size_t pos = it - buf.begin();
-                    bool l = pos == 0 || clean(buf[pos - 1]);
-                    bool r = pos + s.size() < len && clean(buf[pos + s.size()]);
-                    if (l && r) { best = p.second; break; }
-                    ++it;
+    bool want_direct = j.id == "mastersword" || j.id == "mkw-thwomp" || j.id == "slowseparation" ||
+                       j.id == "shadowracket" || j.id == "wonderbloom" || j.id == "yatmb";
+    for (const auto &rg : ranges) {
+        if (SDL_SeekIO(io, (Sint64)rg.first, SDL_IO_SEEK_SET) < 0) continue;
+        Uint64 rem = rg.second;
+        size_t have = 0;
+        while (rem > 0) {
+            size_t to_read = (size_t)std::min<Uint64>(chunk, rem);
+            size_t got = SDL_ReadIO(io, buf.data() + have, to_read);
+            if (got == 0) break;
+            rem -= got;
+            size_t len = have + got;
+            if (direct.empty()) direct = probe_direct_chunk(buf.data(), len, j.id, j.exe_stem, j.title);
+            if (direct.empty()) {
+                for (auto &p : pats) {
+                    if (p.second >= best) continue;
+                    const std::string &s = p.first;
+                    auto it = buf.begin(), end = buf.begin() + len;
+                    std::boyer_moore_horspool_searcher<std::string::const_iterator> bm(s.begin(), s.end());
+                    while ((it = std::search(it, end, bm)) != end) {
+                        size_t pos = it - buf.begin();
+                        bool l = pos == 0 || clean(buf[pos - 1]);
+                        size_t after = pos + s.size();
+                        bool r = (after == len && rem == 0) ||
+                                 (after < len && (clean(buf[after]) || is_git_describe_tail(buf.data(), len, after)));
+                        if (l && r) { best = p.second; break; }
+                        ++it;
+                    }
                 }
             }
+            if (!direct.empty() || (best == 0 && !want_direct)) break;
+            size_t k = std::min(keep, len);
+            memmove(buf.data(), buf.data() + len - k, k);
+            have = k;
         }
-        if (!direct.empty() || (best == 0 && j.id != "mastersword" && j.id != "mkw-thwomp" && j.id != "slowseparation" &&
-                                j.id != "shadowracket" && j.id != "wonderbloom") ||
-            got == 0)
-            break;
-        // keep the end of this chunk, so a tag or runtime header across the boundary is still found
-        size_t k = std::min(keep, len);
-        memmove(buf.data(), buf.data() + len - k, k);
-        have = k;
+        if (!direct.empty() || (best == 0 && !want_direct)) break;
     }
     SDL_CloseIO(io);
     if (!direct.empty()) {
@@ -1030,7 +1092,7 @@ void version_probe_start() {
             if (g_ports[i].all[k].version != prev[k]) quick_changed = true;
     }
     if (quick_changed) {
-        for (int i = 0; i < kBuiltinCount; ++i) rank(g_ports[i].all);
+        for (int i = 0; i < kBuiltinCount; ++i) rank(g_ports[i], g_ports[i].all);
         refilter();
         library_save();
     }
@@ -1089,7 +1151,7 @@ bool version_probe_poll() {
         }
     }
     if (changed) {   // with their real versions the copies may rank differently (the newest becomes the main one)
-        for (Port &p : g_ports) rank(p.all);
+        for (Port &p : g_ports) rank(p, p.all);
         refilter();
         library_save();
     }
@@ -1121,7 +1183,7 @@ bool scan_poll() {
         for (size_t k = 0; same && k < now.size(); ++k) same = now[k].dir == got[k].dir && now[k].version == got[k].version;
         if (!same) changed = true;
         now = got;
-        rank(now);
+        rank(g_ports[i], now);
     }
     refilter();
     library_save();

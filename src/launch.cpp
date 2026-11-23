@@ -47,6 +47,7 @@ static const Profile kProfiles[] = {
     // DKB: dkb.exe with the player's exefs and packed romfs (DKBLauncher.py launch_game)
     {"dkb-bananas", {}, {"DKB_GPU_NAME={gpu}", "!NS2_SHOW_LAUNCHER=0"}, {"dkb.exe", "exefs\\main", "romfs\\romfs.bin"}, {}, "logs\\dkb.log", nullptr},
     {"wonderbloom", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"smbw.exe"}, {}, "logs\\smbw.log", nullptr},
+    {"yatmb", {}, {"!NS2_SHOW_LAUNCHER=0", "!YATMB_SHOW_LAUNCHER=0"}, {"yatmb.exe"}, {}, "logs\\yatmb.log", nullptr},
 };
 
 static const Profile *profile_of(const Port &p) {
