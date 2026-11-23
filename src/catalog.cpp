@@ -49,6 +49,9 @@ static std::vector<Port> g_ports = {
     {"yatmb", "Yoshi and the Mysterious Book", "YATMB", "STS78721/YATMB", "0.1.0", "156 MB",
      "yoshiandthemysteriousbook", "YATMB", "yatmb.exe", nullptr, "YATMBLauncher.exe", "YATMB",
      {IM_COL32(96, 226, 68, 255), IM_COL32(14, 38, 22, 255)}},
+    {"orbit", "Orbitals", "ORBIT", "STS78721/ORBIT", "0.1.0", "159 MB",
+     "orbitals", "ORB", "orbitals.exe", nullptr, "OrbitalsLauncher.exe", "Orbitals",
+     {IM_COL32(76, 201, 255, 255), IM_COL32(10, 17, 36, 255)}},
 };
 
 static int g_builtin_count = (int)g_ports.size();
@@ -384,7 +387,7 @@ struct ScanResult {
 };
 static std::mutex g_lock;
 static std::vector<ScanResult> g_found;   // per scanned port id, while a search runs
-static std::atomic<bool> g_running{false}, g_done{false};
+static std::atomic<bool> g_running{false}, g_done{false}, g_rescan_queued{false};
 static std::atomic<int> g_folders{0};
 
 static bool scan_port_files(const ScanPort &p, const std::string &dir) {
@@ -533,7 +536,11 @@ static int search(void *arg) {
 }
 
 void scan_start() {
-    if (g_running) return;
+    if (g_running) {
+        g_rescan_queued = true;
+        return;
+    }
+    g_rescan_queued = false;
     auto *sp = new std::vector<ScanPort>();
     for (int i = 0; i < g_builtin_count && i < (int)g_ports.size(); ++i) {
         const Port &p = g_ports[i];
@@ -548,7 +555,7 @@ void scan_start() {
     else { delete sp; g_running = false; }
 }
 
-bool scan_running() { return g_running; }
+bool scan_running() { return g_running || g_rescan_queued; }
 int scan_folders() { return g_folders; }
 
 // ---- library.ini: the last search, shown instantly at the next start
@@ -1273,7 +1280,10 @@ bool version_probe_poll() {
 }
 
 bool scan_poll() {
-    if (!g_done.exchange(false)) return false;
+    if (!g_done.exchange(false)) {
+        if (!g_running && g_rescan_queued.exchange(false)) scan_start();
+        return false;
+    }
     std::vector<ScanResult> results;
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -1306,6 +1316,7 @@ bool scan_poll() {
     }
     refilter();
     library_save();
+    if (!g_running && g_rescan_queued.exchange(false)) scan_start();
     return changed;
 }
 

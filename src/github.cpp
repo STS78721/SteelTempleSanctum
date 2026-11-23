@@ -33,7 +33,7 @@ static std::vector<std::pair<std::string, std::vector<Release>>> g_ready;
 static std::string g_catalog_body;
 static bool g_catalog_ready = false;
 static std::string g_status;
-static std::atomic<bool> g_busy{false}, g_force{false};
+static std::atomic<bool> g_busy{false}, g_force{false}, g_recheck_queued{false}, g_recheck_force{false};
 
 static AssetKind kind_of(const std::string &name) {
     std::string n;
@@ -161,8 +161,13 @@ void github_load_saved() {
 }
 
 void github_refresh(bool force) {
+    if (g_busy.exchange(true)) {
+        if (force) g_recheck_force = true;
+        g_recheck_queued = true;
+        return;
+    }
+    g_recheck_queued = false;
     if (force) g_force = true;
-    if (g_busy.exchange(true)) return;
     auto *fp = new std::vector<FetchPort>();
     const auto &ps = ports();
     int bn = builtin_port_count();
@@ -174,7 +179,7 @@ void github_refresh(bool force) {
     else { delete fp; g_busy = false; }
 }
 
-bool github_busy() { return g_busy; }
+bool github_busy() { return g_busy || g_recheck_queued; }
 
 bool github_poll() {
     std::vector<std::pair<std::string, std::vector<Release>>> ready;
@@ -192,13 +197,14 @@ bool github_poll() {
             changed = true;
             covers_reload();
             scan_start();
-            github_refresh(true);
+            github_refresh(false);
         }
     }
     for (auto &r : ready) {
         int idx = port_index_by_id(r.first);
         if (idx >= 0) ports()[idx].releases = std::move(r.second), changed = true;
     }
+    if (!g_busy && g_recheck_queued.exchange(false)) github_refresh(g_recheck_force.exchange(false));
     return changed;
 }
 
