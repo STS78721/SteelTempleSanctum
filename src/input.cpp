@@ -2,6 +2,14 @@
 
 #include <cmath>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <devpropdef.h>
+#include <setupapi.h>
+#include <xinput.h>
+#endif
+
 #include "app.h"
 #include "config.h"
 
@@ -82,6 +90,215 @@ static void use_pad(SDL_JoystickID id) {
     app().pad_name = n ? n : "Controller";
 }
 
+#ifdef _WIN32
+struct XInputBatCache {
+    Uint64 at_ms = 0;
+    bool valid = false;
+    BYTE type = BATTERY_TYPE_DISCONNECTED;
+    BYTE level = BATTERY_LEVEL_EMPTY;
+};
+static XInputBatCache g_xi_bat[4];
+
+struct BtBatEntry {
+    std::string id_upper;   // uppercase PnP instance ID + hardware IDs for VID/PID/MAC matching
+    int pct = -1;
+};
+static Uint64 g_bt_bat_at_ms = 0;
+static bool g_bt_bat_valid = false;
+static std::vector<BtBatEntry> g_bt_bat_entries;
+
+static void reset_xinput_battery_cache() {
+    for (auto &c : g_xi_bat) c = {};
+    g_bt_bat_valid = false;
+}
+
+static bool query_bt_battery(SDL_Gamepad *pad, int *pct_out) {
+    Uint16 vid = SDL_GetGamepadVendor(pad);
+    Uint16 pid = SDL_GetGamepadProduct(pad);
+    const char *path = SDL_GetGamepadPath(pad);
+    const char *serial = SDL_GetGamepadSerial(pad);
+    bool looks_bt = false;
+    if (path) {
+        for (const char *p = path; *p; ++p) {
+            if ((p[0] == 'B' || p[0] == 'b') && (p[1] == 'T' || p[1] == 't') && (p[2] == 'H' || p[2] == 'h')) {
+                looks_bt = true;
+                break;
+            }
+        }
+    }
+    if (!looks_bt && SDL_GetGamepadConnectionState(pad) == SDL_JOYSTICK_CONNECTION_WIRELESS) looks_bt = true;
+    // Official Xbox One / Series X|S BLE controllers may report ConnState=UNKNOWN over WGI/RawInput
+    if (!looks_bt && vid == 0x045e && pid != 0x028e && pid != 0) looks_bt = true;
+    if (!looks_bt) return false;
+
+    Uint64 now = SDL_GetTicks();
+    if (!g_bt_bat_valid || now - g_bt_bat_at_ms >= 5000) {
+        g_bt_bat_entries.clear();
+        g_bt_bat_at_ms = now;
+        g_bt_bat_valid = true;
+        static const DEVPROPKEY kBtBatKey = {
+            {0x104EA319, 0x6EE2, 0x4701, {0xBD, 0x47, 0x8D, 0xDB, 0xF4, 0x25, 0xBB, 0xE5}}, 2
+        };
+        static const wchar_t *const kEnums[] = {L"BTHLEDevice", L"BTHLE", L"BTHENUM"};
+        for (const wchar_t *en : kEnums) {
+            HDEVINFO hdi = SetupDiGetClassDevsW(nullptr, en, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+            if (hdi == INVALID_HANDLE_VALUE) continue;
+            SP_DEVINFO_DATA did{};
+            did.cbSize = sizeof did;
+            for (DWORD i = 0; SetupDiEnumDeviceInfo(hdi, i, &did); ++i) {
+                DEVPROPTYPE ptype = 0;
+                BYTE bval = 0;
+                DWORD req = 0;
+                if (!SetupDiGetDevicePropertyW(hdi, &did, &kBtBatKey, &ptype, &bval, sizeof bval, &req, 0)) continue;
+                if (ptype != DEVPROP_TYPE_BYTE || bval > 100) continue;
+                wchar_t wbuf[512] = {};
+                std::string combined;
+                if (SetupDiGetDeviceInstanceIdW(hdi, &did, wbuf, 512, nullptr)) {
+                    for (wchar_t *w = wbuf; *w; ++w)
+                        combined.push_back((char)((*w >= L'a' && *w <= L'z') ? (*w - L'a' + L'A') : (*w < 128 ? *w : '?')));
+                }
+                wchar_t hwbuf[512] = {};
+                if (SetupDiGetDeviceRegistryPropertyW(hdi, &did, SPDRP_HARDWAREID, nullptr, (PBYTE)hwbuf, sizeof hwbuf - 2, nullptr)) {
+                    combined.push_back(' ');
+                    for (int k = 0; k < 511 && !(hwbuf[k] == 0 && hwbuf[k + 1] == 0); ++k) {
+                        wchar_t ch = hwbuf[k];
+                        combined.push_back(ch ? (char)((ch >= L'a' && ch <= L'z') ? (ch - L'a' + L'A') : (ch < 128 ? ch : '?')) : ' ');
+                    }
+                }
+                if (!combined.empty()) g_bt_bat_entries.push_back({std::move(combined), (int)bval});
+            }
+            SetupDiDestroyDeviceInfoList(hdi);
+        }
+    }
+
+    // Build normalized MAC/serial needle (strip ':' and '-') and VID/PID hex needles
+    std::string mac;
+    if (serial && *serial) {
+        for (const char *s = serial; *s; ++s) {
+            char c = *s;
+            if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) mac.push_back(c);
+            else if (c >= 'a' && c <= 'f') mac.push_back((char)(c - 'a' + 'A'));
+        }
+    }
+    char v1[16], v2[16], p1[16], p2[16];
+    SDL_snprintf(v1, sizeof v1, "VID_%04X", vid);
+    SDL_snprintf(v2, sizeof v2, "VID&0002%04X", vid);
+    SDL_snprintf(p1, sizeof p1, "PID_%04X", pid);
+    SDL_snprintf(p2, sizeof p2, "PID&%04X", pid);
+
+    if (mac.size() >= 12) {
+        for (const auto &e : g_bt_bat_entries) {
+            if (e.id_upper.find(mac) != std::string::npos) {
+                if (pct_out) *pct_out = e.pct;
+                return true;
+            }
+        }
+    }
+    if (vid && pid) {
+        for (const auto &e : g_bt_bat_entries) {
+            bool vm = e.id_upper.find(v1) != std::string::npos || e.id_upper.find(v2) != std::string::npos;
+            bool pm = e.id_upper.find(p1) != std::string::npos || e.id_upper.find(p2) != std::string::npos;
+            if (vm && pm) {
+                if (pct_out) *pct_out = e.pct;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool query_xinput_battery(int slot, BYTE *type_out, BYTE *level_out) {
+    if (slot < 0 || slot >= 4) return false;
+    Uint64 now = SDL_GetTicks();
+    XInputBatCache &c = g_xi_bat[slot];
+    if (c.valid && now - c.at_ms < 2000) {
+        *type_out = c.type;
+        *level_out = c.level;
+        return true;
+    }
+    typedef DWORD (WINAPI *PFN_XInputGetBatteryInformation)(DWORD, BYTE, XINPUT_BATTERY_INFORMATION *);
+    static bool loaded = false;
+    static PFN_XInputGetBatteryInformation fn = nullptr;
+    if (!loaded) {
+        loaded = true;
+        HMODULE m = LoadLibraryA("xinput1_4.dll");
+        if (!m) m = LoadLibraryA("xinput1_3.dll");
+        if (m) fn = (PFN_XInputGetBatteryInformation)GetProcAddress(m, "XInputGetBatteryInformation");
+    }
+    if (!fn) return false;
+    XINPUT_BATTERY_INFORMATION bi{};
+    if (fn((DWORD)slot, BATTERY_DEVTYPE_GAMEPAD, &bi) != ERROR_SUCCESS) {
+        c.valid = false;
+        return false;
+    }
+    c.at_ms = now;
+    c.valid = true;
+    c.type = bi.BatteryType;
+    c.level = bi.BatteryLevel;
+    *type_out = bi.BatteryType;
+    *level_out = bi.BatteryLevel;
+    return true;
+}
+#endif
+
+PadPower input_pad_power(SDL_Gamepad *pad, int *pct_out) {
+    if (pct_out) *pct_out = -1;
+    if (!pad) return PAD_PWR_NONE;
+
+#ifdef _WIN32
+    // SDL3 maps XInput's BATTERY_TYPE_WIRED ("wired device, no battery") to SDL_POWERSTATE_CHARGING (100%),
+    // causing wired Xbox 360 pads and 2.4 GHz USB dongles/docks to falsely report "100% (Charging)".
+    // Query XInput directly for XInput-backed pads so only genuine wireless batteries report charge.
+    const char *path = SDL_GetGamepadPath(pad);
+    if (path && SDL_strncmp(path, "XInput#", 7) == 0 && path[7] >= '0' && path[7] <= '3') {
+        int slot = path[7] - '0';
+        BYTE btype = BATTERY_TYPE_UNKNOWN, blevel = BATTERY_LEVEL_EMPTY;
+        if (query_xinput_battery(slot, &btype, &blevel)) {
+            if (btype == BATTERY_TYPE_ALKALINE || btype == BATTERY_TYPE_NIMH) {
+                static const int kPct[] = {5, 25, 60, 100};
+                if (pct_out) *pct_out = kPct[SDL_clamp((int)blevel, 0, 3)];
+                return PAD_PWR_BATTERY;
+            }
+            if (btype == BATTERY_TYPE_UNKNOWN && query_bt_battery(pad, pct_out)) return PAD_PWR_BATTERY;
+            return PAD_PWR_NONE;
+        }
+        int pct = -1;
+        SDL_PowerState ps = SDL_GetGamepadPowerInfo(pad, &pct);
+        if (ps == SDL_POWERSTATE_ON_BATTERY) {
+            if (pct_out) *pct_out = pct;
+            return PAD_PWR_BATTERY;
+        }
+        return PAD_PWR_NONE;
+    }
+#endif
+
+    int pct = -1;
+    SDL_PowerState ps = SDL_GetGamepadPowerInfo(pad, &pct);
+    // Wired Xbox 360 USB descriptor (045E:028E) carries no battery telemetry even over RawInput/WGI
+    if (SDL_GetGamepadVendor(pad) == 0x045e && SDL_GetGamepadProduct(pad) == 0x028e &&
+        (ps == SDL_POWERSTATE_CHARGING || ps == SDL_POWERSTATE_CHARGED)) {
+        return PAD_PWR_NONE;
+    }
+    switch (ps) {
+    case SDL_POWERSTATE_ON_BATTERY:
+        if (pct_out) *pct_out = pct;
+        return PAD_PWR_BATTERY;
+    case SDL_POWERSTATE_CHARGING:
+        if (pct_out) *pct_out = pct;
+        return PAD_PWR_CHARGING;
+    case SDL_POWERSTATE_CHARGED:
+        if (pct_out) *pct_out = pct;
+        return PAD_PWR_CHARGED;
+    default:
+#ifdef _WIN32
+        if (query_bt_battery(pad, pct_out)) return PAD_PWR_BATTERY;
+#endif
+        return PAD_PWR_NONE;
+    }
+}
+
+SDL_JoystickID input_active_pad_id() { return g_pad_id; }
+
 bool input_pad_battery(int *pct_out, bool *charging_out) {
     SDL_Gamepad *pad = g_pad_id ? SDL_GetGamepadFromID(g_pad_id) : nullptr;
     if (!pad) {
@@ -91,13 +308,11 @@ bool input_pad_battery(int *pct_out, bool *charging_out) {
             SDL_free(ids);
         }
     }
-    if (!pad) return false;
     int pct = -1;
-    SDL_PowerState ps = SDL_GetGamepadPowerInfo(pad, &pct);
-    if (ps != SDL_POWERSTATE_ON_BATTERY && ps != SDL_POWERSTATE_CHARGING && ps != SDL_POWERSTATE_CHARGED)
-        return false;
+    PadPower pw = input_pad_power(pad, &pct);
+    if (pw == PAD_PWR_NONE) return false;
     if (pct_out) *pct_out = pct;
-    if (charging_out) *charging_out = (ps == SDL_POWERSTATE_CHARGING || ps == SDL_POWERSTATE_CHARGED);
+    if (charging_out) *charging_out = (pw == PAD_PWR_CHARGING);
     return true;
 }
 
@@ -387,10 +602,16 @@ void input_event(const SDL_Event &e) {
     App &a = app();
     switch (e.type) {
     case SDL_EVENT_GAMEPAD_ADDED:
+#ifdef _WIN32
+        reset_xinput_battery_cache();
+#endif
         if (SDL_OpenGamepad(e.gdevice.which)) use_pad(e.gdevice.which);
         g_last_activity = a.now;
         break;
     case SDL_EVENT_GAMEPAD_REMOVED:
+#ifdef _WIN32
+        reset_xinput_battery_cache();
+#endif
         if (SDL_Gamepad *g = SDL_GetGamepadFromID(e.gdevice.which)) SDL_CloseGamepad(g);
         if (g_pad_id == e.gdevice.which) g_pad_id = 0;
         a.pad = PAD_KEYBOARD;

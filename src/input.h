@@ -27,8 +27,11 @@ float input_deadzone_threshold();
 double input_last_activity();
 void input_note_activity();
 
-// Wireless controller battery info (returns true when a connected gamepad reports battery status)
+// Wireless controller battery info (excludes wired pads & 2.4 GHz XInput dongles with no battery telemetry)
+enum PadPower { PAD_PWR_NONE = 0, PAD_PWR_BATTERY, PAD_PWR_CHARGING, PAD_PWR_CHARGED };
+PadPower input_pad_power(SDL_Gamepad *pad, int *pct_out);
 bool input_pad_battery(int *pct_out, bool *charging_out);
+SDL_JoystickID input_active_pad_id();
 
 // While a game is running: checks if Back+Start+L+R are held for 2.0 s to force-close a hung game
 bool input_poll_force_close(double now);

@@ -1228,10 +1228,13 @@ void folder_frame() {
 }
 
 // ======================= Controllers tester (dual sticks + deadzone ring + analog triggers + buttons + battery)
+static float g_ctrl_scroll = 0, g_ctrl_scroll_target = 0;
+static SDL_JoystickID g_ctrl_last_active = 0;
+
 void controllers_frame() {
     App &a = app();
     const Palette &p = pal();
-    if (a.nav == NAV_B) { go_back(); return; }
+    if (a.nav == NAV_B) { g_ctrl_scroll = g_ctrl_scroll_target = 0; g_ctrl_last_active = 0; go_back(); return; }
     if (a.nav == NAV_Y) {
         cfg().stick_deadzone = (cfg().stick_deadzone + 1) % 3;
         config_save();
@@ -1244,90 +1247,224 @@ void controllers_frame() {
 
     background(0);
     status_bar();
-    text(96, 86, 26, p.text, "Controllers & Tester");
+    float tw = text(96, 86, 26, p.text, "Controllers & Tester");
+
+    struct PadView {
+        SDL_Gamepad *g = nullptr;
+        SDL_JoystickID id = 0;
+        std::string name;
+        PadPower pwr = PAD_PWR_NONE;
+        int pct = -1;
+        bool wired = false;
+        bool active = false;
+        bool mock_r2 = false;
+    };
+    std::vector<PadView> views;
+    int real_count = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&real_count);
+    SDL_JoystickID active_id = input_active_pad_id();
+    for (int i = 0; ids && i < real_count; ++i) {
+        SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
+        if (!g) continue;
+        PadView v;
+        v.g = g;
+        v.id = ids[i];
+        const char *nm = SDL_GetGamepadName(g);
+        v.name = nm ? nm : "Controller";
+        v.pwr = input_pad_power(g, &v.pct);
+        v.wired = SDL_GetGamepadConnectionState(g) == SDL_JOYSTICK_CONNECTION_WIRED;
+        v.active = (ids[i] == active_id);
+        views.push_back(std::move(v));
+    }
+    SDL_free(ids);
+
+    // Demo-only mock multi-controller preview (never runs outside SANCTUM_DEMO=1)
+    if (demo_mode()) {
+        if (const char *mp = getenv("SANCTUM_MOCK_PADS")) {
+            int want = SDL_clamp(atoi(mp), 0, 8);
+            if (want > 0) {
+                views.clear();
+                static const struct { const char *n; PadPower pw; int pct; bool wired; } kDemo[] = {
+                    {"DualSense Wireless Controller", PAD_PWR_BATTERY, 18, false},
+                    {"Razer Wolverine V3 Pro", PAD_PWR_NONE, -1, false},
+                    {"Xbox 360 Controller", PAD_PWR_NONE, -1, false},
+                    {"Xbox Series X Controller", PAD_PWR_BATTERY, 82, false},
+                    {"Nintendo Switch Pro Controller", PAD_PWR_CHARGING, 64, false},
+                    {"DualShock 4 Wireless Controller", PAD_PWR_CHARGED, 100, false},
+                };
+                for (int i = 0; i < want; ++i) {
+                    const auto &d = kDemo[i % 6];
+                    PadView v;
+                    v.id = (SDL_JoystickID)(100 + i);
+                    v.name = d.n;
+                    v.pwr = d.pw;
+                    v.pct = d.pct;
+                    v.wired = d.wired;
+                    v.active = (i == want - 1);
+                    v.mock_r2 = (i == want - 1);
+                    views.push_back(std::move(v));
+                }
+            }
+        }
+    }
+
+    int count = (int)views.size();
+    if (count > 0) {
+        char cb[32];
+        SDL_snprintf(cb, sizeof cb, "%d connected", count);
+        float cw = text_w(13, cb) + 18;
+        rect(96 + tw + 14, 92, cw, 22, p.panel2, 11);
+        text(96 + tw + 14 + cw * 0.5f, 96, 13, p.soft, cb, 0.5f);
+    }
+
     float dz = input_deadzone_threshold();
     char dz_lbl[48];
     SDL_snprintf(dz_lbl, sizeof dz_lbl, "Deadzone: %d%%  (Y cycles)", (int)(dz * 100 + 0.5f));
     text(1184, 96, 15, p.soft, dz_lbl, 1);
 
-    int count = 0;
-    SDL_JoystickID *ids = SDL_GetGamepads(&count);
     if (!count) {
         rect(96, 140, 1088, 110, p.panel, 16);
         icon(IC_PAD, 154, 195, 42, p.soft);
         text(204, 168, 20, p.text, "No controller connected");
         text(204, 198, 15, p.soft, "Connect an Xbox, PlayStation, Switch Pro, or generic pad to test sticks, triggers, buttons, and vibration.");
-    }
-    for (int i = 0; ids && i < count && i < 3; ++i) {
-        SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
-        if (!g) continue;
-        float y = 136 + i * 158;
-        rect(96, y, 1088, 144, p.panel, 16);
-        icon(IC_PAD, 142, y + 40, 38, p.text);
-        const char *name = SDL_GetGamepadName(g);
-        text(178, y + 16, 19, p.text, fit(19, name ? name : "Controller", 520).c_str());
+    } else {
+        // 1-3 controllers: spacious 144px cards. 4+ controllers: compact 112px cards so all 4 fit at once without scrolling,
+        // and 5+ controllers scroll smoothly inside the clipped viewport.
+        bool compact = count >= 4;
+        float card_h = compact ? 112.0f : 144.0f;
+        float gap = compact ? 8.0f : 14.0f;
+        float step = card_h + gap;
+        float view_top = 130.0f;
+        float view_bot = 604.0f;
+        float view_h = view_bot - view_top;
+        float total_h = count * card_h + (count - 1) * gap;
+        float max_scroll = std::max(0.0f, total_h - view_h);
 
-        // Wireless battery status on the card
-        int bpct = -1;
-        SDL_PowerState bps = SDL_GetGamepadPowerInfo(g, &bpct);
-        if (bps == SDL_POWERSTATE_ON_BATTERY || bps == SDL_POWERSTATE_CHARGING || bps == SDL_POWERSTATE_CHARGED) {
-            bool chg = bps == SDL_POWERSTATE_CHARGING || bps == SDL_POWERSTATE_CHARGED;
-            char bstr[48];
-            if (bpct >= 0) SDL_snprintf(bstr, sizeof bstr, chg ? "Battery %d%% (Charging)" : "Battery %d%%", bpct);
-            else SDL_snprintf(bstr, sizeof bstr, chg ? "Charging" : "On battery");
-            text(900, y + 18, 14, chg ? p.ok : (bpct >= 0 && bpct < 20 ? p.warn : p.soft), bstr, 1);
+        if (max_scroll > 0.5f) {
+            if (a.nav == NAV_DOWN || a.nav == NAV_R) g_ctrl_scroll_target += step;
+            if (a.nav == NAV_UP || a.nav == NAV_L) g_ctrl_scroll_target -= step;
+            float wheel = ImGui::GetIO().MouseWheel;
+            if (std::fabs(wheel) > 0.01f) g_ctrl_scroll_target -= wheel * step * 0.75f;
+            // Auto-scroll newly active controller into view (e.g. picking up pad #5)
+            if (active_id && active_id != g_ctrl_last_active) {
+                g_ctrl_last_active = active_id;
+                for (int i = 0; i < count; ++i) {
+                    if (views[i].id == active_id) {
+                        float cy0 = i * step, cy1 = cy0 + card_h;
+                        if (cy0 < g_ctrl_scroll_target) g_ctrl_scroll_target = cy0;
+                        else if (cy1 > g_ctrl_scroll_target + view_h) g_ctrl_scroll_target = cy1 - view_h;
+                        break;
+                    }
+                }
+            }
+            g_ctrl_scroll_target = SDL_clamp(g_ctrl_scroll_target, 0.0f, max_scroll);
+            g_ctrl_scroll += (g_ctrl_scroll_target - g_ctrl_scroll) * std::min(1.0f, a.dt * 14.0f);
+            if (std::fabs(g_ctrl_scroll - g_ctrl_scroll_target) < 0.4f) g_ctrl_scroll = g_ctrl_scroll_target;
         } else {
-            text(900, y + 18, 14, p.dim, "Wired / USB", 1);
+            g_ctrl_scroll = g_ctrl_scroll_target = 0.0f;
         }
 
-        // Buttons row
-        struct { SDL_GamepadButton b; const char *l; } bs[] = {
-            {SDL_GAMEPAD_BUTTON_SOUTH, "S"}, {SDL_GAMEPAD_BUTTON_EAST, "E"}, {SDL_GAMEPAD_BUTTON_WEST, "W"},
-            {SDL_GAMEPAD_BUTTON_NORTH, "N"}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, "L1"}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, "R1"},
-            {SDL_GAMEPAD_BUTTON_LEFT_STICK, "L3"}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, "R3"},
-            {SDL_GAMEPAD_BUTTON_DPAD_UP, "Up"}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, "Dn"}, {SDL_GAMEPAD_BUTTON_DPAD_LEFT, "Lt"},
-            {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, "Rt"}, {SDL_GAMEPAD_BUTTON_START, "+"}, {SDL_GAMEPAD_BUTTON_BACK, "-"}};
-        float bx = 178;
-        for (auto &b : bs) {
-            bool down = SDL_GetGamepadButton(g, b.b);
-            rect(bx, y + 52, 46, 30, down ? p.accent : p.panel2, 15);
-            text(bx + 23, y + 58, 13, down ? IM_COL32_WHITE : p.soft, b.l, 0.5f);
-            bx += 51;
+        dl()->PushClipRect(P(88, view_top - 2), P(1206, view_bot + 2), true);
+        for (int i = 0; i < count; ++i) {
+            const PadView &v = views[i];
+            float y = view_top + i * step - g_ctrl_scroll;
+            if (y + card_h < view_top - 4 || y > view_bot + 4) continue;
+
+            rect(96, y, 1088, card_h, p.panel, 16);
+            if (v.active && count > 1) frame(96, y, 1088, card_h, with_alpha(p.accent, 210), 16, 2.0f);
+
+            // Player slot badge (#1, #2, #3, #4...) + controller icon + name
+            char slot_s[8];
+            SDL_snprintf(slot_s, sizeof slot_s, "#%d", i + 1);
+            float badge_y = compact ? y + 10 : y + 16;
+            rect(112, badge_y, 28, 22, v.active && count > 1 ? p.accent : p.panel2, 11);
+            text(126, badge_y + 4, 12, v.active && count > 1 ? IM_COL32_WHITE : p.soft, slot_s, 0.5f);
+            icon(IC_PAD, 158, compact ? y + 21 : y + 27, compact ? 24 : 30, v.active ? p.text : p.soft);
+            text(180, compact ? y + 10 : y + 16, compact ? 17 : 19, p.text,
+                 fit(compact ? 17 : 19, v.name, 480).c_str());
+
+            // Battery / connection status on the card
+            if (v.pwr != PAD_PWR_NONE) {
+                bool chg = (v.pwr == PAD_PWR_CHARGING);
+                bool full = (v.pwr == PAD_PWR_CHARGED);
+                char bstr[48];
+                if (v.pct >= 0) {
+                    SDL_snprintf(bstr, sizeof bstr,
+                                 chg ? "Battery %d%% (Charging)" : full ? "Battery %d%% (Charged)" : "Battery %d%%",
+                                 v.pct);
+                } else {
+                    SDL_snprintf(bstr, sizeof bstr, chg ? "Charging" : full ? "Charged" : "On battery");
+                }
+                text(900, compact ? y + 12 : y + 18, compact ? 13 : 14,
+                     (chg || full) ? p.ok : (v.pct >= 0 && v.pct < 20 ? p.warn : p.soft), bstr, 1);
+            } else {
+                text(900, compact ? y + 12 : y + 18, compact ? 13 : 14, p.dim,
+                     v.wired ? "Wired / USB" : "USB / Dongle (no battery info)", 1);
+            }
+
+            // Buttons row
+            struct { SDL_GamepadButton b; const char *l; } bs[] = {
+                {SDL_GAMEPAD_BUTTON_SOUTH, "S"}, {SDL_GAMEPAD_BUTTON_EAST, "E"}, {SDL_GAMEPAD_BUTTON_WEST, "W"},
+                {SDL_GAMEPAD_BUTTON_NORTH, "N"}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, "L1"}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, "R1"},
+                {SDL_GAMEPAD_BUTTON_LEFT_STICK, "L3"}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, "R3"},
+                {SDL_GAMEPAD_BUTTON_DPAD_UP, "Up"}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, "Dn"}, {SDL_GAMEPAD_BUTTON_DPAD_LEFT, "Lt"},
+                {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, "Rt"}, {SDL_GAMEPAD_BUTTON_START, "+"}, {SDL_GAMEPAD_BUTTON_BACK, "-"}};
+            float bx = 178;
+            float btn_y = compact ? y + 40 : y + 52;
+            float btn_h = compact ? 26.0f : 30.0f;
+            for (auto &b : bs) {
+                bool down = v.g && SDL_GetGamepadButton(v.g, b.b);
+                rect(bx, btn_y, 46, btn_h, down ? p.accent : p.panel2, btn_h * 0.5f);
+                text(bx + 23, btn_y + (compact ? 5.0f : 6.0f), compact ? 12 : 13, down ? IM_COL32_WHITE : p.soft, b.l, 0.5f);
+                bx += 51;
+            }
+
+            // L2 / R2 analog trigger bars
+            float lt = v.g ? SDL_clamp(SDL_GetGamepadAxis(v.g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f, 0.0f, 1.0f) : 0.0f;
+            float rt = v.g ? SDL_clamp(SDL_GetGamepadAxis(v.g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f, 0.0f, 1.0f)
+                           : (v.mock_r2 ? 0.72f : 0.0f);
+            float trig_y = compact ? y + 78 : y + 100;
+            text(178, trig_y, 13, p.dim, "L2");
+            rect(206, trig_y + 4, 240, 10, p.panel2, 5);
+            if (lt > 0.01f) rect(206, trig_y + 4, std::max(8.0f, 240 * lt), 10, p.accent, 5);
+            text(480, trig_y, 13, p.dim, "R2");
+            rect(508, trig_y + 4, 240, 10, p.panel2, 5);
+            if (rt > 0.01f) rect(508, trig_y + 4, std::max(8.0f, 240 * rt), 10, p.accent, 5);
+
+            // Dual sticks with live deadzone ring
+            float R = compact ? 28.0f : 36.0f;
+            float dot_r = compact ? 6.5f : 8.0f;
+            auto draw_stick = [&](float cx, float cy, float ax, float ay, const char *lbl) {
+                circle(cx, cy, R, p.panel2);
+                dl()->AddCircle(P(cx, cy), S(R * dz), with_alpha(p.soft, 110), 32, S(1.5f));
+                bool active = std::fabs(ax) > dz || std::fabs(ay) > dz;
+                circle(cx + ax * (R - dot_r), cy + ay * (R - dot_r), dot_r, active ? p.accent : p.focus);
+                text(cx, cy + R + (compact ? 4 : 6), compact ? 11 : 12, p.dim, lbl, 0.5f);
+            };
+            float lx = v.g ? SDL_GetGamepadAxis(v.g, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f : 0.0f;
+            float ly = v.g ? SDL_GetGamepadAxis(v.g, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f : 0.0f;
+            float rx = v.g ? SDL_GetGamepadAxis(v.g, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f : 0.0f;
+            float ry = v.g ? SDL_GetGamepadAxis(v.g, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f : 0.0f;
+            float sy = compact ? y + 48 : y + 64;
+            draw_stick(1010, sy, lx, ly, "L Stick");
+            draw_stick(1112, sy, rx, ry, "R Stick");
         }
+        dl()->PopClipRect();
 
-        // L2 / R2 analog trigger bars
-        float lt = SDL_clamp(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f, 0.0f, 1.0f);
-        float rt = SDL_clamp(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f, 0.0f, 1.0f);
-        text(178, y + 100, 13, p.dim, "L2");
-        rect(206, y + 104, 240, 10, p.panel2, 5);
-        if (lt > 0.01f) rect(206, y + 104, std::max(8.0f, 240 * lt), 10, p.accent, 5);
-        text(480, y + 100, 13, p.dim, "R2");
-        rect(508, y + 104, 240, 10, p.panel2, 5);
-        if (rt > 0.01f) rect(508, y + 104, std::max(8.0f, 240 * rt), 10, p.accent, 5);
-
-        // Dual sticks with live deadzone ring
-        auto draw_stick = [&](float cx, float cy, float ax, float ay, const char *lbl) {
-            float R = 36;
-            circle(cx, cy, R, p.panel2);
-            dl()->AddCircle(P(cx, cy), S(R * dz), with_alpha(p.soft, 110), 32, S(1.5f));
-            bool active = std::fabs(ax) > dz || std::fabs(ay) > dz;
-            circle(cx + ax * (R - 8), cy + ay * (R - 8), 8, active ? p.accent : p.focus);
-            text(cx, cy + R + 6, 12, p.dim, lbl, 0.5f);
-        };
-        float lx = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-        float ly = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-        float rx = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
-        float ry = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
-        draw_stick(1010, y + 64, lx, ly, "L Stick");
-        draw_stick(1112, y + 64, rx, ry, "R Stick");
+        if (max_scroll > 0.5f) {
+            float bar_h = std::max(36.0f, view_h * (view_h / total_h));
+            float bar_y = view_top + (view_h - bar_h) * (g_ctrl_scroll / max_scroll);
+            rect(1194, view_top, 5, view_h, with_alpha(p.dim, 55), 3);
+            rect(1194, bar_y, 5, bar_h, with_alpha(p.soft, 175), 3);
+        }
     }
-    SDL_free(ids);
 
     text(96, 616, 14, p.dim,
          cfg().pad_layout == 1 ? "Button layout: Nintendo (right confirms, bottom backs). Force-close chord: hold Back + Start + L + R for 2 s."
        : cfg().pad_layout == 2 ? "Button layout: Xbox (bottom confirms, right backs). Force-close chord: hold Back + Start + L + R for 2 s."
        : "Button layout: Automatic. Force-close chord: hold Back + Start + L + R for 2 s while a game is frozen.");
-    hint_bar({{NAV_X, "Test vibration"}, {NAV_Y, "Deadzone"}, {NAV_B, "Back"}});
+    if (count >= 5) hint_bar({{NAV_L, "Up"}, {NAV_R, "Down"}, {NAV_X, "Test vibration"}, {NAV_Y, "Deadzone"}, {NAV_B, "Back"}});
+    else hint_bar({{NAV_X, "Test vibration"}, {NAV_Y, "Deadzone"}, {NAV_B, "Back"}});
 }
 
 // ======================= pages still to come
