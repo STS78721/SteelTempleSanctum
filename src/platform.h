@@ -33,8 +33,26 @@ bool recycle_path(const std::string &path);
 long long folder_size_bytes(const std::string &dir, int *file_count = nullptr);
 
 // Native Windows file open dialog (returns empty string if cancelled).
-// filter_spec: semicolon-separated patterns, e.g. "*.png;*.jpg;*.jpeg;*.bmp" or "*.zip" or "*.exe"
-std::string pick_open_file(SDL_Window *win, const char *title, const char *filter_name, const char *filter_spec);
+// filter_spec: semicolon-separated patterns, e.g. "*.png;*.jpg;*.jpeg;*.bmp" or "*.zip" or "*.exe;*.lnk"
+// no_deref_links: keep .lnk shortcuts as .lnk instead of letting Windows resolve them to their target executable.
+std::string pick_open_file(SDL_Window *win, const char *title, const char *filter_name, const char *filter_spec,
+                           bool no_deref_links = false);
+
+// Windows .lnk shortcut metadata (target executable, launch arguments, working directory, icon location).
+struct ShortcutInfo {
+    std::string target;
+    std::string args;
+    std::string working_dir;
+    std::string icon_path;
+    int icon_index = 0;
+    std::string description;
+};
+bool resolve_shortcut(const std::string &lnk_path, ShortcutInfo &out);
+
+// Extracts high-resolution (up to 256x256 RGBA) cover/icon art from a .lnk shortcut, .ico file, image file, or .exe
+// and saves it as a PNG at dst_png. Returns true on success.
+bool extract_shortcut_cover(const std::string &src_path, const std::string &icon_path, int icon_index,
+                            const std::string &dst_png);
 
 // Pure C++ standard ZIP archive writer for recursive directory backups (stores files with CRC-32 & UTF-8 names).
 bool zip_folder(const std::string &src_dir, const std::string &dst_zip, int *files_written = nullptr);

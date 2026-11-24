@@ -16,6 +16,7 @@
 #include "github.h"
 #include "install.h"
 #include "json.h"
+#include "platform.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -25,18 +26,18 @@
 namespace sanctum {
 
 static std::vector<Port> g_ports = {
-    {"mkw-thwomp", "Mario Kart World", "MKW-THWOMP", "STS78721/MKW-THWOMP", "0.2.3b", "204 MB", "mariokartworld", "MKW",
+    {"mkw-thwomp", "Mario Kart World", "MKW-THWOMP", "STS78721/MKW-THWOMP", "0.2.3c", "204 MB", "mariokartworld", "MKW",
      "mkw.exe", "mkwgame.id", nullptr, "MKW-THWOMP", {IM_COL32(232, 36, 48, 255), IM_COL32(90, 12, 18, 255)}},
-    {"mastersword", "The Legend of Zelda: Ocarina of Time", "MasterSword", "STS78721/OOT-MASTERSWORD", "0.2.3", "176 MB",
+    {"mastersword", "The Legend of Zelda: Ocarina of Time", "MasterSword", "STS78721/OOT-MASTERSWORD", "0.2.4", "176 MB",
      "ocarinaoftime", "OoT", "mastersword.exe", nullptr, "MasterSwordLauncher.exe", nullptr,
      {IM_COL32(47, 158, 90, 255), IM_COL32(122, 90, 18, 255)}},
     {"totk", "The Legend of Zelda: Tears of the Kingdom", "TotK SteelTempleBuild", "STS78721/totk-pc-recomp-SteelTempleBuild",
      "Beta-6.3", "97 MB", "tearsofthekingdom", "TotK", "totk.exe", nullptr, "TotKLauncher.exe", nullptr,
      {IM_COL32(31, 143, 134, 255), IM_COL32(59, 42, 16, 255)}},
-    {"slowseparation", "Fast Fusion", "SlowSeparation", "STS78721/SlowSeparation", "Alpha-0.1.2c", "158 MB", "fastfusion",
+    {"slowseparation", "Fast Fusion", "SlowSeparation", "STS78721/SlowSeparation", "Alpha-0.1.2d", "158 MB", "fastfusion",
      "FF", "ff.exe", nullptr, "FFLauncher.exe", "FF-SlowSeparation",
      {IM_COL32(255, 46, 136, 255), IM_COL32(15, 13, 34, 255)}},
-    {"shadowracket", "Mario Tennis Fever", "ShadowRacket", "STS78721/MTF-ShadowRacket", "Alpha-0.1.4", "156 MB",
+    {"shadowracket", "Mario Tennis Fever", "ShadowRacket", "STS78721/MTF-ShadowRacket", "Alpha-0.1.4", "158 MB",
      "mariotennisfever", "MTF", "mtf.exe", nullptr, "MTFLauncher.exe", "MTF-ShadowRacket",
      {IM_COL32(204, 242, 42, 255), IM_COL32(18, 36, 24, 255)}},
     {"dkb-bananas", "Donkey Kong Bananza", "dkb-BANANAS", "STS78721/dkb-BANANAS", "Alpha-1g", "321 MB",
@@ -46,12 +47,18 @@ static std::vector<Port> g_ports = {
     {"wonderbloom", "Super Mario Bros. Wonder", "WonderBloom", "STS78721/SMBWONDERBLOOM", "0.2.1", "143 MB",
      "supermariobroswonder", "SMBW", "smbw.exe", nullptr, nullptr, nullptr,
      {IM_COL32(156, 72, 232, 255), IM_COL32(38, 16, 72, 255)}},
-    {"yatmb", "Yoshi and the Mysterious Book", "YATMB", "STS78721/YATMB", "0.1.0", "156 MB",
+    {"yatmb", "Yoshi and the Mysterious Book", "YATMB", "STS78721/YATMB", "0.1.2", "156 MB",
      "yoshiandthemysteriousbook", "YATMB", "yatmb.exe", nullptr, "YATMBLauncher.exe", "YATMB",
      {IM_COL32(96, 226, 68, 255), IM_COL32(14, 38, 22, 255)}},
-    {"orbit", "Orbitals", "ORBIT", "STS78721/ORBIT", "0.1.0", "159 MB",
+    {"orbit", "Orbitals", "ORBIT", "STS78721/ORBIT", "0.1.1", "159 MB",
      "orbitals", "ORB", "orbitals.exe", nullptr, "OrbitalsLauncher.exe", "Orbitals",
      {IM_COL32(76, 201, 255, 255), IM_COL32(10, 17, 36, 255)}},
+    {"sunhound", "Star Fox", "SUNHOUND", "STS78721/SUNHOUND", "0.1.0", "156 MB",
+     "starfox", "SF", "starfox.exe", nullptr, "StarFoxLauncher.exe", "StarFox",
+     {IM_COL32(0, 229, 160, 255), IM_COL32(5, 11, 20, 255)}},
+    {"byeguide", "Nintendo Switch 2 Welcome Tour", "BYEGUIDE", "STS78721/BYEGUIDE", "0.1.0", "158 MB",
+     "nintendoswitch2welcometour", "WT", "welcometour.exe", nullptr, "WelcomeTourLauncher.exe", "WelcomeTour",
+     {IM_COL32(0, 200, 238, 255), IM_COL32(11, 14, 22, 255)}},
 };
 
 static int g_builtin_count = (int)g_ports.size();
@@ -93,6 +100,7 @@ static void refilter();
 static void rank(const Port &p, std::vector<Install> &v);
 static void apply_known_versions(const Port &p, std::vector<Install> &v);
 static bool version_newer(const std::string &a, const std::string &b);
+static bool is_dev_path(const std::string &dir);
 
 bool port_files(const Port &p, const std::string &dir) {
     return exists(dir + "\\" + p.exe) || (p.launcher && exists(dir + "\\" + p.launcher));
@@ -216,18 +224,29 @@ bool catalog_remove(int port, const std::string &dir) {
 }
 
 void catalog_installed(int port, const std::string &dir, const std::string &version) {
+    if (port < 0 || port >= (int)g_ports.size()) return;
     Port &p = g_ports[port];
+    catalog_invalidate_version(port, dir);
+    bool updated = false;
     for (Install &in : p.all)
         if (lower(in.dir) == lower(dir)) {
             in.version = version;
-            refilter();
-            library_save();
-            return;
+            in.launcher = p.launcher && exists(dir + "\\" + p.launcher);
+            in.dev = !in.registered && is_dev_path(in.dir);
+            updated = true;
+            break;
         }
-    Install in;
-    in.dir = dir, in.version = version;
-    in.launcher = p.launcher && exists(dir + "\\" + p.launcher);
-    p.all.insert(p.all.begin(), in);   // the copy just installed is the one Play starts
+    if (!updated) {
+        Install in;
+        in.dir = dir, in.version = version;
+        in.launcher = p.launcher && exists(dir + "\\" + p.launcher);
+        in.dev = is_dev_path(in.dir);
+        p.all.insert(p.all.begin(), in);
+    }
+    // Keep the copy Sanctum just installed/updated as the preferred primary copy across restarts
+    cfg().prefer[p.id] = dir;
+    config_save();
+    rank(p, p.all);
     refilter();
     library_save();
 }
@@ -281,16 +300,17 @@ static bool version_newer(const std::string &a, const std::string &b) {
     return a.size() - i > b.size() - j;   // "0.2.2c" / "0.2.2.b" after "0.2.2"
 }
 
-// best first: a Setup Wizard's install, a player's copy before a build folder, a playable copy (has the game exe)
-// before a launcher-only folder, the newest version (an unknown one last), one with its launcher, then shortest path
+// best first: a player's copy before a build folder, a playable copy (has the game exe) before a launcher-only folder,
+// the newest version (so a newer portable install beats an outdated Setup Wizard copy), registered tie-break,
+// one with its launcher, then shortest path
 static void rank(const Port &p, std::vector<Install> &v) {
     std::stable_sort(v.begin(), v.end(), [&](const Install &a, const Install &b) {
-        if (a.registered != b.registered) return a.registered;
         if (a.dev != b.dev) return !a.dev;
         bool ra = port_ready(p, a), rb = port_ready(p, b);
         if (ra != rb) return ra;
         if (a.version.empty() != b.version.empty()) return !a.version.empty();
         if (tag_key(a.version) != tag_key(b.version)) return version_newer(a.version, b.version);
+        if (a.registered != b.registered) return a.registered;
         if (a.launcher != b.launcher) return a.launcher;
         return a.dir.size() < b.dir.size();
     });
@@ -346,7 +366,31 @@ static std::string companion_dll(const std::string &dir, const char *id, const c
     return {};
 }
 
-static std::string read_version(const std::string &dir, const char *exe) {
+static std::string parse_version_file(const std::string &full_path, SDL_Time *mtime_out = nullptr) {
+    SDL_PathInfo pi{};
+    if (mtime_out) *mtime_out = 0;
+    size_t n = 0;
+    char *d = (char *)SDL_LoadFile(full_path.c_str(), &n);
+    if (!d) return {};
+    std::string s(d, std::min<size_t>(n, 64));
+    SDL_free(d);
+    s = s.substr(0, s.find_first_of("\r\n"));
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    if (lower(s).rfind("version=", 0) == 0) {
+        s.erase(0, 8);
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(0, 1);
+    }
+    // a version is short and plain (not, say, a resource script that happens to be called version.txt)
+    if (s.empty() || s.size() > 24 || s.find_first_of("(=#{") != std::string::npos) return {};
+    if (mtime_out && SDL_GetPathInfo(full_path.c_str(), &pi)) *mtime_out = pi.modify_time;
+    return s;
+}
+
+static std::string read_sanctum_stamp(const std::string &dir, SDL_Time *mtime_out = nullptr) {
+    return parse_version_file(dir + "\\.sanctum-version", mtime_out);
+}
+
+static std::string read_disk_version_file(const std::string &dir, const char *exe, SDL_Time *mtime_out = nullptr) {
     std::vector<std::string> files;
     std::string stem = exe_stem_of(exe);
     if (!stem.empty()) {
@@ -359,22 +403,34 @@ static std::string read_version(const std::string &dir, const char *exe) {
     size_t sl = dir.find_last_of("\\/");
     if (sl != std::string::npos && lower(dir.substr(sl + 1)) == "dist" && !stem.empty())
         files.push_back("..\\launcher\\" + stem + "_version.txt");
+    std::string best;
+    SDL_Time best_mt = 0;
     for (const std::string &f : files) {
-        size_t n = 0;
-        char *d = (char *)SDL_LoadFile((dir + "\\" + f).c_str(), &n);
-        if (!d) continue;
-        std::string s(d, std::min<size_t>(n, 64));
-        SDL_free(d);
-        s = s.substr(0, s.find_first_of("\r\n"));
-        while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
-        if (lower(s).rfind("version=", 0) == 0) {
-            s.erase(0, 8);
-            while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(0, 1);
+        SDL_Time mt = 0;
+        std::string s = parse_version_file(dir + "\\" + f, &mt);
+        if (s.empty()) continue;
+        if (best.empty() || (tag_key(s) != tag_key(best) && version_newer(s, best)) ||
+            (tag_key(s) == tag_key(best) && mt > best_mt)) {
+            best = s;
+            best_mt = mt;
         }
-        // a version is short and plain (not, say, a resource script that happens to be called version.txt)
-        if (!s.empty() && s.size() <= 24 && s.find_first_of("(=#{") == std::string::npos) return s;
     }
-    return {};
+    if (mtime_out) *mtime_out = best_mt;
+    return best;
+}
+
+static std::string read_version(const std::string &dir, const char *exe) {
+    SDL_Time stamp_mt = 0, file_mt = 0;
+    std::string stamp = read_sanctum_stamp(dir, &stamp_mt);
+    std::string fver = read_disk_version_file(dir, exe, &file_mt);
+    if (!stamp.empty()) {
+        // Trust Sanctum's stamp unless an external update later wrote a strictly newer version file
+        if (!fver.empty() && tag_key(fver) != tag_key(stamp) && version_newer(fver, stamp) &&
+            file_mt > stamp_mt + 2000000000LL)
+            return fver;
+        return stamp;
+    }
+    return fver;
 }
 
 // ---- results: found on the worker, merged on the UI thread (uses a thread-safe snapshot of ports)
@@ -499,8 +555,13 @@ static int search(void *arg) {
         if (dir.empty() || !scan_port_files(p, dir)) continue;
         Install in;
         in.dir = dir;
-        in.version = reg_string(HKEY_CURRENT_USER, sub, L"DisplayVersion");
-        if (in.version.empty()) in.version = read_version(dir, p.exe.c_str());
+        std::string reg_ver = reg_string(HKEY_CURRENT_USER, sub, L"DisplayVersion");
+        std::string disk_ver = read_version(dir, p.exe.c_str());
+        // Never let a stale Uninstall DisplayVersion mask a newer VERSION or .sanctum-version on disk
+        if (!disk_ver.empty() && (!read_sanctum_stamp(dir).empty() || reg_ver.empty() || !version_newer(reg_ver, disk_ver)))
+            in.version = disk_ver;
+        else
+            in.version = reg_ver;
         in.launcher = !p.launcher.empty() && exists(dir + "\\" + p.launcher);
         in.registered = true;
         add_found(out, i, std::move(in));
@@ -760,19 +821,51 @@ int catalog_add_custom(const std::string &exe_path, const std::string &custom_ti
     if (sl == std::string::npos || sl + 1 >= clean.size()) return -1;
     std::string dir = clean.substr(0, sl);
     std::string exe = clean.substr(sl + 1);
-    // Avoid duplicates of exact same folder + exe
-    for (int i = 0; i < (int)g_ports.size(); ++i)
-        if (!g_ports[i].all.empty() && lower(g_ports[i].all[0].dir) == lower(dir) && lower(g_ports[i].exe) == lower(exe))
-            return i;
-
     std::string title = custom_title;
+    std::string sc_args;
+    std::string sc_icon_src;
+    int sc_icon_idx = 0;
+    std::string orig_lnk;
+
+    // Resolve Windows .lnk shortcuts (e.g. Ryujinx, Eden, Brontide, Steam, Desktop game shortcuts):
+    // preserve the shortcut's game name, target executable, ROM/launch arguments, and high-res icon/art.
+    bool is_lnk = exe.size() > 4 && SDL_strcasecmp(exe.c_str() + exe.size() - 4, ".lnk") == 0;
+    if (is_lnk) {
+        orig_lnk = clean;
+        if (title.empty()) title = exe.substr(0, exe.size() - 4);
+        ShortcutInfo sc;
+        if (resolve_shortcut(clean, sc) && !sc.target.empty() && exists(sc.target)) {
+            std::string tgt = sc.target;
+            for (char &c : tgt) if (c == '/') c = '\\';
+            size_t tsl = tgt.find_last_of('\\');
+            if (tsl != std::string::npos && tsl + 1 < tgt.size()) {
+                dir = tgt.substr(0, tsl);
+                exe = tgt.substr(tsl + 1);
+            }
+            sc_args = sc.args;
+            sc_icon_src = sc.icon_path;
+            sc_icon_idx = sc.icon_index;
+        }
+    }
+
+    // Avoid duplicates: match exact folder + exe + launch args so multiple emulator .lnk shortcuts
+    // targeting the same emulator .exe (with different ROM arguments) stay distinct tiles.
+    for (int i = 0; i < (int)g_ports.size(); ++i) {
+        if (g_ports[i].all.empty()) continue;
+        if (lower(g_ports[i].all[0].dir) != lower(dir) || lower(g_ports[i].exe) != lower(exe)) continue;
+        auto ait = cfg().launch_args.find(g_ports[i].id);
+        std::string cur_args = (ait == cfg().launch_args.end()) ? std::string() : ait->second;
+        if (cur_args == sc_args) return i;
+    }
+
     if (title.empty()) {
-        // Prefer parent folder name unless generic ("bin", "build", "dist", "game", "games")
+        // Prefer parent folder name unless generic ("bin", "build", "dist", "desktop", "downloads", etc.)
         size_t psl = dir.find_last_of('\\');
         std::string folder = psl == std::string::npos ? dir : dir.substr(psl + 1);
         std::string lf = lower(folder);
         bool generic = lf.empty() || lf == "bin" || lf == "build" || lf == "dist" || lf == "game" || lf == "games" ||
-                       lf == "release" || lf == "x64" || lf == "win64" || (folder.size() == 2 && folder[1] == ':');
+                       lf == "release" || lf == "x64" || lf == "win64" || lf == "desktop" || lf == "downloads" ||
+                       lf == "documents" || lf == "public" || (folder.size() == 2 && folder[1] == ':');
         if (!generic) title = folder;
         else {
             size_t dot = exe.rfind('.');
@@ -799,6 +892,24 @@ int catalog_add_custom(const std::string &exe_path, const std::string &custom_ti
     b.exe = exe;
     b.colours = kCustomPalette[(int)(g_ports.size() - g_builtin_count) % 6];
     append_custom_port(std::move(b));
+
+    bool cfg_dirty = false;
+    if (!sc_args.empty()) {
+        cfg().launch_args[id] = sc_args;
+        cfg_dirty = true;
+    }
+    if (is_lnk) {
+        std::string cov_dir = local_dir() + "custom-covers";
+        SDL_CreateDirectory(cov_dir.c_str());
+        std::string cov_png = cov_dir + "\\" + id + ".png";
+        std::string fallback_src = !orig_lnk.empty() ? orig_lnk : (dir + "\\" + exe);
+        if (extract_shortcut_cover(fallback_src, sc_icon_src, sc_icon_idx, cov_png)) {
+            cfg().port_covers[id] = cov_png;
+            cfg_dirty = true;
+            sanctum_log("catalog: extracted shortcut cover for %s -> %s", id.c_str(), cov_png.c_str());
+        }
+    }
+    if (cfg_dirty) config_save();
     custom_games_save();
     covers_reload();
     return (int)g_ports.size() - 1;
@@ -807,6 +918,8 @@ int catalog_add_custom(const std::string &exe_path, const std::string &custom_ti
 bool catalog_remove_custom(int port) {
     if (port < g_builtin_count || port >= (int)g_ports.size() || !g_ports[port].custom) return false;
     std::string id = g_ports[port].id;
+    std::string cov_png = local_dir() + "custom-covers\\" + id + ".png";
+    SDL_RemovePath(cov_png.c_str());
     g_ports.erase(g_ports.begin() + port);
     cfg().pinned.erase(id);
     cfg().port_covers.erase(id);
@@ -1171,14 +1284,64 @@ static std::string pick_newer_version(const Port &p, const std::string &a, const
     return version_newer(nb, na) ? nb : na;
 }
 
-// the versions already read (versions.ini) combined with VERSION / <stem>_version.txt on disk:
-// whichever is newer wins, so stale VERSION files never downgrade a newer exe, and launcher/runtime-only
-// hotfix updates (which update VERSION without rebuilding the game exe) are never overwritten by the older exe
+void catalog_invalidate_version(int port, const std::string &dir) {
+    if (port < 0 || port >= (int)g_ports.size()) return;
+    if (!g_probe_cache_loaded) probe_cache_load();
+    const Port &p = g_ports[port];
+    std::vector<std::string> bases;
+    if (!dir.empty()) {
+        bases.push_back(lower(dir + "\\" + p.exe + "|"));
+    } else {
+        for (const Install &in : p.all) bases.push_back(lower(in.dir + "\\" + p.exe + "|"));
+    }
+    if (bases.empty()) return;
+    std::lock_guard<std::mutex> l(g_probe_lock);
+    bool erased = false;
+    for (auto it = g_probe_cache.begin(); it != g_probe_cache.end();) {
+        std::string lk = lower(it->first);
+        bool match = false;
+        for (const std::string &b : bases)
+            if (lk.rfind(b, 0) == 0) { match = true; break; }
+        if (match) { it = g_probe_cache.erase(it); erased = true; }
+        else ++it;
+    }
+    if (erased) probe_cache_save();
+}
+
+static SDL_Time binary_mtime(const std::string &exe, const std::string &dll) {
+    SDL_Time mt = 0;
+    SDL_PathInfo i{};
+    if (SDL_GetPathInfo(exe.c_str(), &i)) mt = std::max(mt, i.modify_time);
+    if (!dll.empty() && SDL_GetPathInfo(dll.c_str(), &i)) mt = std::max(mt, i.modify_time);
+    return mt;
+}
+
+static std::string resolve_install_version(const Port &p, const std::string &dir, const std::string &bin_ver) {
+    SDL_Time stamp_mt = 0, file_mt = 0;
+    std::string stamp = read_sanctum_stamp(dir, &stamp_mt);
+    std::string file_ver = read_disk_version_file(dir, p.exe, &file_mt);
+    if (!stamp.empty()) {
+        std::string best = normalize_port_version(p, stamp);
+        SDL_Time bin_mt = binary_mtime(dir + "\\" + p.exe, companion_dll(dir, p.id, p.exe));
+        // Only override Sanctum's stamp if an external update/relink later produced a newer binary or VERSION file
+        if (!bin_ver.empty() && tag_key(bin_ver) != tag_key(best) && version_newer(bin_ver, best) &&
+            bin_mt > stamp_mt + 2000000000LL)
+            best = normalize_port_version(p, bin_ver);
+        if (!file_ver.empty() && tag_key(file_ver) != tag_key(best) && version_newer(file_ver, best) &&
+            file_mt > stamp_mt + 2000000000LL)
+            best = normalize_port_version(p, file_ver);
+        return best;
+    }
+    return pick_newer_version(p, bin_ver, file_ver);
+}
+
+// the versions already read (versions.ini) combined with .sanctum-version and VERSION / <stem>_version.txt on disk:
+// whichever is newer wins, so stale VERSION files never downgrade a newer exe, and Sanctum-installed updates
+// (including hotfixes or un-relinked updates) are never overwritten back down to an older exe or stale registry entry
 static void apply_known_versions(const Port &p, std::vector<Install> &v) {
     if (!g_probe_cache_loaded) probe_cache_load();
     std::string sig = port_tags_signature(p);
     for (Install &in : v) {
-        std::string file_ver = read_version(in.dir, p.exe);
         std::string bin_ver;
         std::string dll = companion_dll(in.dir, p.id, p.exe);
         std::string pref = probe_prefix(in.dir + "\\" + p.exe, dll);
@@ -1188,7 +1351,7 @@ static void apply_known_versions(const Port &p, std::vector<Install> &v) {
             if (it != g_probe_cache.end() && !it->second.empty()) {
                 bin_ver = it->second;
             } else {
-                // before github_load_saved() runs, still reuse any v3 cache entry for this exact exe+dll signature
+                // before github_load_saved() runs, still reuse any v4 cache entry for this exact exe+dll signature
                 for (const auto &e : g_probe_cache)
                     if (e.first.rfind(pref, 0) == 0 && !e.second.empty()) {
                         bin_ver = e.second;
@@ -1196,7 +1359,7 @@ static void apply_known_versions(const Port &p, std::vector<Install> &v) {
                     }
             }
         }
-        std::string best = pick_newer_version(p, bin_ver, file_ver);
+        std::string best = resolve_install_version(p, in.dir, bin_ver);
         if (!best.empty()) in.version = best;
         else if (!in.version.empty()) in.version = normalize_port_version(p, in.version);
     }
@@ -1263,7 +1426,7 @@ bool version_probe_poll() {
         const Port &p = g_ports[pi];
         for (Install &in : g_ports[pi].all) {
             if (lower(in.dir) != lower(h.dir)) continue;
-            std::string best = pick_newer_version(p, h.version, read_version(in.dir, p.exe));
+            std::string best = resolve_install_version(p, in.dir, h.version);
             if (!best.empty() && in.version != best) {
                 sanctum_log("version: %s now %s (was %s)", in.dir.c_str(), best.c_str(), in.version.c_str());
                 in.version = best, changed = true;

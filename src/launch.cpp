@@ -58,6 +58,9 @@ static const Profile kProfiles[] = {
     {"dkb-bananas", {}, {"DKB_GPU_NAME={gpu}", "!NS2_SHOW_LAUNCHER=0"}, {"dkb.exe", "exefs\\main", "romfs\\romfs.bin"}, {}, "logs\\dkb.log", nullptr},
     {"wonderbloom", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"smbw.exe"}, {}, "logs\\smbw.log", nullptr},
     {"yatmb", {}, {"!NS2_SHOW_LAUNCHER=0", "!YATMB_SHOW_LAUNCHER=0"}, {"yatmb.exe"}, {}, "logs\\yatmb.log", nullptr},
+    {"orbit", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"orbitals.exe"}, {}, "logs\\orbitals.log", nullptr},
+    {"sunhound", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"starfox.exe"}, {}, "logs\\starfox.log", nullptr},
+    {"byeguide", {}, {"!NS2_SHOW_LAUNCHER=0"}, {"welcometour.exe"}, {}, "logs\\welcometour.log", nullptr},
 };
 
 static const Profile *profile_of(const Port &p) {
@@ -229,13 +232,59 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     if (!play && !p.launcher) { sound_play(SFX_ERROR); toast(std::string(p.name) + " is missing " + missing_for_play(p, in)); return false; }
 
     std::string exe = in.dir + "\\" + (play ? p.exe : p.launcher);
+    std::string cwd = in.dir;
     std::vector<std::string> argv{exe};
+    auto ends_ci = [](const std::string &s, const char *suf) {
+        size_t sl = SDL_strlen(suf);
+        return s.size() >= sl && SDL_strcasecmp(s.c_str() + s.size() - sl, suf) == 0;
+    };
+    // Resolve legacy or direct .lnk custom shortcuts cleanly so CreateProcessW never fails with Win32 error 193
+    if (ends_ci(exe, ".lnk")) {
+        ShortcutInfo sc;
+        if (!resolve_shortcut(exe, sc) || sc.target.empty()) {
+            sound_play(SFX_ERROR);
+            toast("Could not resolve shortcut target for " + std::string(p.title), 4);
+            return false;
+        }
+        exe = sc.target;
+        if (!sc.working_dir.empty() && exists(sc.working_dir)) {
+            cwd = sc.working_dir;
+        } else {
+            size_t sl = exe.find_last_of("\\/");
+            if (sl != std::string::npos) cwd = exe.substr(0, sl);
+        }
+        argv = {exe};
+        if (!sc.args.empty())
+            for (auto &a : split_args(sc.args)) argv.push_back(std::move(a));
+    }
     if (play && pr)
         for (const char *a : pr->args) argv.push_back(expand(a, in));
+    std::vector<std::string> steam_env_kv;
     if (play) {
         auto it = cfg().launch_args.find(p.id);
-        if (it != cfg().launch_args.end() && !it->second.empty())
-            for (auto &extra : split_args(it->second)) argv.push_back(std::move(extra));
+        if (it != cfg().launch_args.end() && !it->second.empty()) {
+            auto toks = split_args(it->second);
+            // Support Steam-style "KEY=VAL %command% -dx12 -fullscreen" as well as plain "-dx12 -fullscreen"
+            size_t cmd_pos = toks.size();
+            for (size_t i = 0; i < toks.size(); ++i)
+                if (SDL_strcasecmp(toks[i].c_str(), "%command%") == 0) { cmd_pos = i; break; }
+            if (cmd_pos < toks.size()) {
+                for (size_t i = 0; i < cmd_pos; ++i)
+                    if (toks[i].find('=') != std::string::npos) steam_env_kv.push_back(toks[i]);
+                for (size_t i = cmd_pos + 1; i < toks.size(); ++i) argv.push_back(toks[i]);
+            } else {
+                for (auto &extra : toks) argv.push_back(std::move(extra));
+            }
+        }
+    }
+    // Support .bat / .cmd scripts cleanly through cmd.exe /c
+    if (ends_ci(exe, ".bat") || ends_ci(exe, ".cmd")) {
+        const char *cs = getenv("COMSPEC");
+        std::string cmd_exe = (cs && *cs) ? std::string(cs) : std::string("C:\\Windows\\System32\\cmd.exe");
+        std::vector<std::string> wrapped = {cmd_exe, "/c"};
+        for (auto &a : argv) wrapped.push_back(std::move(a));
+        exe = cmd_exe;
+        argv = std::move(wrapped);
     }
 
     // the environment: Sanctum's own, plus what the port's launcher would add (never over the player's own values)
@@ -266,6 +315,7 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     if (play) {
         auto it = cfg().launch_env.find(p.id);
         if (it != cfg().launch_env.end() && !it->second.empty()) apply_custom_env(env, it->second);
+        for (const std::string &kv : steam_env_kv) apply_custom_env(env, kv);
     }
 
     // Build UTF-16 command line & environment block and launch with CREATE_NO_WINDOW so console-subsystem games
@@ -304,7 +354,7 @@ bool launch(SDL_Window *w, int port_i, const Install &in, bool own_launcher) {
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdInput = si.hStdOutput = si.hStdError = nul ? nul : INVALID_HANDLE_VALUE;
     PROCESS_INFORMATION pi{};
-    std::wstring exe_w = utf8_w(exe), cwd_w = utf8_w(in.dir);
+    std::wstring exe_w = utf8_w(exe), cwd_w = utf8_w(cwd);
     DWORD flags = CREATE_NO_WINDOW | (env_block.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
     BOOL ok = CreateProcessW(exe_w.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags,
                              env_block.empty() ? nullptr : (LPVOID)env_block.data(), cwd_w.c_str(), &si, &pi);

@@ -677,7 +677,8 @@ static void act(const Row &r) {
     case R_ADD_PORT: folder_open("", FOLDER_ADD_PORT); return;
     case R_ADD_CUSTOM: {
         if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: custom games unchanged"); return; }
-        std::string exe = pick_open_file(app().window, "Choose a PC game executable", "Programs", "*.exe");
+        std::string exe = pick_open_file(app().window, "Choose a game executable or shortcut (.exe, .lnk)",
+                                         "Games & Shortcuts", "*.exe;*.lnk;*.bat;*.cmd", true);
         if (!exe.empty()) {
             int idx = catalog_add_custom(exe);
             if (idx >= 0) {

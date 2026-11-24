@@ -251,6 +251,19 @@ static void handle_drop_file(const std::string &path) {
         }
         return;
     }
+    if (ends_ci(".lnk") || ends_ci(".exe") || ends_ci(".bat") || ends_ci(".cmd")) {
+        int idx = catalog_add_custom(path);
+        if (idx >= 0) {
+            sound_play(SFX_TOGGLE_ON);
+            toast("Added " + std::string(ports()[idx].title) + " to your library");
+            a.game = idx;
+            go(SCR_GAME);
+        } else {
+            sound_play(SFX_ERROR);
+            toast("Could not add shortcut or executable");
+        }
+        return;
+    }
     if (ends_ci(".png") || ends_ci(".jpg") || ends_ci(".jpeg") || ends_ci(".bmp")) {
         int pid = a.game;
         if ((a.screen == SCR_GAME || a.screen == SCR_HOME) && pid >= 0 && pid < (int)ports().size()) {

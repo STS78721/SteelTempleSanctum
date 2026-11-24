@@ -143,7 +143,8 @@ long long folder_size_bytes(const std::string &dir, int *file_count) {
     return bytes;
 }
 
-std::string pick_open_file(SDL_Window *win, const char *title, const char *filter_name, const char *filter_spec) {
+std::string pick_open_file(SDL_Window *win, const char *title, const char *filter_name, const char *filter_spec,
+                           bool no_deref_links) {
     bool was_fs = win && (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN);
     if (was_fs) SDL_SetWindowFullscreen(win, false);
     if (!SDL_CursorVisible()) SDL_ShowCursor();
@@ -156,8 +157,11 @@ std::string pick_open_file(SDL_Window *win, const char *title, const char *filte
         IFileOpenDialog *dlg = nullptr;
         if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog, (void **)&dlg)) && dlg) {
             DWORD opts = 0;
-            if (SUCCEEDED(dlg->GetOptions(&opts)))
-                dlg->SetOptions(opts | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
+            if (SUCCEEDED(dlg->GetOptions(&opts))) {
+                opts |= FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST;
+                if (no_deref_links) opts |= FOS_NODEREFERENCELINKS;
+                dlg->SetOptions(opts);
+            }
             std::wstring wtitle = to_wide(title ? title : "Choose file");
             dlg->SetTitle(wtitle.c_str());
             std::wstring wfname = to_wide(filter_name ? filter_name : "Files");
@@ -588,6 +592,7 @@ static const GUID kClsidWicImagingFactory = {0xCACAF262, 0x9370, 0x4615, {0xA1, 
 static const GUID kIidIWicImagingFactory  = {0xEC5EC8A9, 0xC395, 0x4314, {0x9C, 0x77, 0x54, 0xD7, 0xA9, 0x35, 0xFF, 0x70}};
 static const GUID kWicContainerPng        = {0x1B7CFAF4, 0x713F, 0x473C, {0xBB, 0xCD, 0x61, 0x37, 0x42, 0x5F, 0xAE, 0xAF}};
 static const GUID kWicFmt24bppBGR         = {0x6FDDC324, 0x4E03, 0x4BFE, {0xB1, 0x85, 0x3D, 0x77, 0x76, 0x8D, 0xC9, 0x0C}};
+static const GUID kWicFmt32bppBGRA        = {0x6FDDC324, 0x4E03, 0x4BFE, {0xB1, 0x85, 0x3D, 0x77, 0x76, 0x8D, 0xC9, 0x0F}};
 
 bool monitor_rect_for_hwnd(void *target_hwnd, int &x, int &y, int &w, int &h) {
     HWND hwnd = (HWND)target_hwnd;
@@ -705,7 +710,8 @@ void display_refresh_override_pop() {
     g_hz_dev.clear();
 }
 
-static bool write_bgra_png_wic(const uint8_t *bgra, int w, int h, const std::string &dst_png) {
+static bool write_bgra_png_wic_ex(const uint8_t *bgra, int w, int h, const std::string &dst_png, bool keep_alpha) {
+    if (!bgra || w <= 0 || h <= 0) return false;
     HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool uninit = SUCCEEDED(co);
     if (FAILED(co) && co != RPC_E_CHANGED_MODE) return false;
@@ -724,23 +730,33 @@ static bool write_bgra_png_wic(const uint8_t *bgra, int w, int h, const std::str
                         IWICBitmapFrameEncode *frame = nullptr;
                         if (SUCCEEDED(enc->CreateNewFrame(&frame, nullptr)) && frame) {
                             if (SUCCEEDED(frame->Initialize(nullptr)) && SUCCEEDED(frame->SetSize((UINT)w, (UINT)h))) {
-                                WICPixelFormatGUID fmt = kWicFmt24bppBGR;
-                                frame->SetPixelFormat(&fmt);
-                                // Convert BGRA -> opaque 24-bit BGR (smaller PNGs, zero alpha issues)
-                                int stride24 = (w * 3 + 3) & ~3;
-                                std::vector<uint8_t> bgr((size_t)stride24 * (size_t)h);
-                                for (int row = 0; row < h; ++row) {
-                                    const uint8_t *src = bgra + (size_t)row * (size_t)w * 4;
-                                    uint8_t *dst = bgr.data() + (size_t)row * (size_t)stride24;
-                                    for (int col = 0; col < w; ++col) {
-                                        dst[col * 3 + 0] = src[col * 4 + 0];
-                                        dst[col * 3 + 1] = src[col * 4 + 1];
-                                        dst[col * 3 + 2] = src[col * 4 + 2];
+                                if (keep_alpha) {
+                                    WICPixelFormatGUID fmt = kWicFmt32bppBGRA;
+                                    frame->SetPixelFormat(&fmt);
+                                    UINT stride = (UINT)(w * 4);
+                                    if (SUCCEEDED(frame->WritePixels((UINT)h, stride, stride * (UINT)h, (BYTE *)bgra)) &&
+                                        SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit())) {
+                                        ok = true;
                                     }
-                                }
-                                if (SUCCEEDED(frame->WritePixels((UINT)h, (UINT)stride24, (UINT)bgr.size(), bgr.data())) &&
-                                    SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit())) {
-                                    ok = true;
+                                } else {
+                                    WICPixelFormatGUID fmt = kWicFmt24bppBGR;
+                                    frame->SetPixelFormat(&fmt);
+                                    // Convert BGRA -> opaque 24-bit BGR (smaller PNGs, zero alpha issues)
+                                    int stride24 = (w * 3 + 3) & ~3;
+                                    std::vector<uint8_t> bgr((size_t)stride24 * (size_t)h);
+                                    for (int row = 0; row < h; ++row) {
+                                        const uint8_t *src = bgra + (size_t)row * (size_t)w * 4;
+                                        uint8_t *dst = bgr.data() + (size_t)row * (size_t)stride24;
+                                        for (int col = 0; col < w; ++col) {
+                                            dst[col * 3 + 0] = src[col * 4 + 0];
+                                            dst[col * 3 + 1] = src[col * 4 + 1];
+                                            dst[col * 3 + 2] = src[col * 4 + 2];
+                                        }
+                                    }
+                                    if (SUCCEEDED(frame->WritePixels((UINT)h, (UINT)stride24, (UINT)bgr.size(), bgr.data())) &&
+                                        SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit())) {
+                                        ok = true;
+                                    }
                                 }
                             }
                             frame->Release();
@@ -757,6 +773,266 @@ static bool write_bgra_png_wic(const uint8_t *bgra, int w, int h, const std::str
     if (!ok) { SDL_RemovePath(tmp.c_str()); return false; }
     if (!SDL_RenamePath(tmp.c_str(), dst_png.c_str())) { SDL_RemovePath(tmp.c_str()); return false; }
     return true;
+}
+
+static bool write_bgra_png_wic(const uint8_t *bgra, int w, int h, const std::string &dst_png) {
+    return write_bgra_png_wic_ex(bgra, w, h, dst_png, false);
+}
+
+static std::wstring expand_env_w(const wchar_t *in) {
+    if (!in || !*in) return {};
+    wchar_t out[2048] = {};
+    DWORD n = ExpandEnvironmentStringsW(in, out, 2048);
+    if (n > 0 && n < 2048) return out;
+    return in;
+}
+
+bool resolve_shortcut(const std::string &lnk_path, ShortcutInfo &out) {
+    out = {};
+    if (lnk_path.empty()) return false;
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(co);
+    if (FAILED(co) && co != RPC_E_CHANGED_MODE) return false;
+
+    bool ok = false;
+    IShellLinkW *sl = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, (void **)&sl)) && sl) {
+        IPersistFile *pf = nullptr;
+        if (SUCCEEDED(sl->QueryInterface(IID_IPersistFile, (void **)&pf)) && pf) {
+            std::wstring wlnk = to_wide(lnk_path);
+            if (SUCCEEDED(pf->Load(wlnk.c_str(), STGM_READ))) {
+                wchar_t target[2048] = {};
+                if (FAILED(sl->GetPath(target, 2048, nullptr, SLGP_RAWPATH)) || !target[0])
+                    sl->GetPath(target, 2048, nullptr, SLGP_UNCPRIORITY);
+                std::wstring wt = expand_env_w(target);
+                if (!wt.empty()) {
+                    out.target = to_utf8(wt.c_str());
+                    ok = true;
+                }
+                wchar_t args[4096] = {};
+                if (SUCCEEDED(sl->GetArguments(args, 4096)) && args[0]) out.args = to_utf8(args);
+                wchar_t cwd[2048] = {};
+                if (SUCCEEDED(sl->GetWorkingDirectory(cwd, 2048)) && cwd[0])
+                    out.working_dir = to_utf8(expand_env_w(cwd).c_str());
+                wchar_t icon[2048] = {};
+                int idx = 0;
+                if (SUCCEEDED(sl->GetIconLocation(icon, 2048, &idx)) && icon[0]) {
+                    out.icon_path = to_utf8(expand_env_w(icon).c_str());
+                    out.icon_index = idx;
+                }
+                wchar_t desc[1024] = {};
+                if (SUCCEEDED(sl->GetDescription(desc, 1024)) && desc[0]) out.description = to_utf8(desc);
+            }
+            pf->Release();
+        }
+        sl->Release();
+    }
+    if (uninit) CoUninitialize();
+    return ok;
+}
+
+static bool ends_with_ci(const std::string &s, const char *suf) {
+    size_t sl = SDL_strlen(suf);
+    return s.size() >= sl && SDL_strcasecmp(s.c_str() + s.size() - sl, suf) == 0;
+}
+
+static bool save_hbitmap_png(HBITMAP hbmp, const std::string &dst_png) {
+    if (!hbmp) return false;
+    BITMAP bm{};
+    if (!GetObjectW(hbmp, sizeof bm, &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) return false;
+    int w = bm.bmWidth, h = bm.bmHeight;
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;   // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    std::vector<uint8_t> px((size_t)w * (size_t)h * 4);
+    HDC hdc = GetDC(nullptr);
+    int rows = hdc ? GetDIBits(hdc, hbmp, 0, (UINT)h, px.data(), &bi, DIB_RGB_COLORS) : 0;
+    if (hdc) ReleaseDC(nullptr, hdc);
+    if (rows <= 0) return false;
+    bool has_alpha = false;
+    for (size_t i = 3; i < px.size(); i += 4) if (px[i] != 0) { has_alpha = true; break; }
+    if (!has_alpha) for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    return write_bgra_png_wic_ex(px.data(), w, h, dst_png, true);
+}
+
+static bool save_hicon_png(HICON hicon, int size, const std::string &dst_png) {
+    if (!hicon || size <= 0) return false;
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = size;
+    bi.bmiHeader.biHeight = -size;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void *bits = nullptr;
+    HDC sdc = GetDC(nullptr);
+    HDC mdc = sdc ? CreateCompatibleDC(sdc) : nullptr;
+    HBITMAP dib = mdc ? CreateDIBSection(mdc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+    bool ok = false;
+    if (dib && bits) {
+        HGDIOBJ old = SelectObject(mdc, dib);
+        memset(bits, 0, (size_t)size * (size_t)size * 4);
+        if (DrawIconEx(mdc, 0, 0, hicon, size, size, 0, nullptr, DI_NORMAL)) {
+            GdiFlush();
+            const uint8_t *p = (const uint8_t *)bits;
+            std::vector<uint8_t> px(p, p + (size_t)size * (size_t)size * 4);
+            bool any_nz = false, any_alpha = false;
+            for (size_t i = 0; i < px.size(); i += 4) {
+                if (px[i] || px[i + 1] || px[i + 2]) any_nz = true;
+                if (px[i + 3]) any_alpha = true;
+            }
+            if (any_nz && !any_alpha) for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+            if (any_nz || any_alpha) ok = write_bgra_png_wic_ex(px.data(), size, size, dst_png, true);
+        }
+        SelectObject(mdc, old);
+        DeleteObject(dib);
+    }
+    if (mdc) DeleteDC(mdc);
+    if (sdc) ReleaseDC(nullptr, sdc);
+    return ok;
+}
+
+static bool extract_ico_file_to_png(const std::string &ico_path, const std::string &dst_png) {
+    size_t sz = 0;
+    uint8_t *data = (uint8_t *)SDL_LoadFile(ico_path.c_str(), &sz);
+    if (!data || sz < 22) { SDL_free(data); return false; }
+    auto rd16 = [&](size_t off) -> uint16_t { return (uint16_t)(data[off] | (data[off + 1] << 8)); };
+    auto rd32 = [&](size_t off) -> uint32_t {
+        return (uint32_t)data[off] | ((uint32_t)data[off + 1] << 8) | ((uint32_t)data[off + 2] << 16) | ((uint32_t)data[off + 3] << 24);
+    };
+    uint16_t rsv = rd16(0), type = rd16(2), count = rd16(4);
+    if (rsv != 0 || type != 1 || count == 0 || 6u + (size_t)count * 16u > sz) { SDL_free(data); return false; }
+
+    int best_i = -1;
+    uint64_t best_score = 0;
+    for (int i = 0; i < count; ++i) {
+        size_t e = 6u + (size_t)i * 16u;
+        uint32_t w = data[e + 0] ? data[e + 0] : 256u;
+        uint32_t h = data[e + 1] ? data[e + 1] : 256u;
+        uint16_t bpp = rd16(e + 6);
+        uint32_t esz = rd32(e + 8), eoff = rd32(e + 12);
+        if ((uint64_t)eoff + esz > sz || esz < 8) continue;
+        uint64_t score = ((uint64_t)w * h << 16) | (bpp ? bpp : 32u);
+        if (score > best_score) { best_score = score; best_i = i; }
+    }
+    bool ok = false;
+    if (best_i >= 0) {
+        size_t e = 6u + (size_t)best_i * 16u;
+        uint32_t esz = rd32(e + 8), eoff = rd32(e + 12);
+        const uint8_t *img = data + eoff;
+        static const uint8_t kPngSig[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+        if (esz >= 8 && memcmp(img, kPngSig, 8) == 0) {
+            std::string tmp = dst_png + ".tmp";
+            if (SDL_SaveFile(tmp.c_str(), img, esz)) ok = SDL_RenamePath(tmp.c_str(), dst_png.c_str());
+            if (!ok) SDL_RemovePath(tmp.c_str());
+        } else if (esz >= 40) {
+            uint32_t hdr_sz = rd32(eoff);
+            int32_t bw = (int32_t)rd32(eoff + 4);
+            int32_t bh_full = (int32_t)rd32(eoff + 8);
+            uint16_t bpp = rd16(eoff + 14);
+            uint32_t comp = rd32(eoff + 16);
+            int h = (bh_full < 0 ? -bh_full : bh_full) / 2;
+            if (hdr_sz >= 40 && bw > 0 && bw <= 1024 && h > 0 && h <= 1024 && bpp == 32 && comp == 0 &&
+                (uint64_t)hdr_sz + (uint64_t)bw * (uint64_t)h * 4ull <= esz) {
+                const uint8_t *pix = img + hdr_sz;
+                std::vector<uint8_t> top((size_t)bw * (size_t)h * 4);
+                bool bottom_up = bh_full > 0;
+                for (int y = 0; y < h; ++y) {
+                    int sy = bottom_up ? (h - 1 - y) : y;
+                    memcpy(top.data() + (size_t)y * (size_t)bw * 4, pix + (size_t)sy * (size_t)bw * 4, (size_t)bw * 4);
+                }
+                bool any_alpha = false;
+                for (size_t i = 3; i < top.size(); i += 4) if (top[i] != 0) { any_alpha = true; break; }
+                if (!any_alpha) {
+                    // Apply 1-bit AND mask if present, otherwise opaque
+                    size_t xor_bytes = (size_t)bw * (size_t)h * 4;
+                    size_t mask_stride = (size_t)(((bw + 31) / 32) * 4);
+                    bool has_mask = (uint64_t)hdr_sz + xor_bytes + mask_stride * (size_t)h <= esz;
+                    const uint8_t *mask = has_mask ? (pix + xor_bytes) : nullptr;
+                    for (int y = 0; y < h; ++y) {
+                        int sy = bottom_up ? (h - 1 - y) : y;
+                        for (int x = 0; x < bw; ++x) {
+                            bool transp = mask && ((mask[(size_t)sy * mask_stride + (size_t)(x >> 3)] >> (7 - (x & 7))) & 1);
+                            top[((size_t)y * (size_t)bw + (size_t)x) * 4 + 3] = transp ? 0 : 255;
+                        }
+                    }
+                }
+                ok = write_bgra_png_wic_ex(top.data(), bw, h, dst_png, true);
+            }
+        }
+    }
+    SDL_free(data);
+    return ok;
+}
+
+bool extract_shortcut_cover(const std::string &src_path, const std::string &icon_path, int icon_index,
+                            const std::string &dst_png) {
+    if (dst_png.empty()) return false;
+    // Ensure parent directory exists
+    size_t sl = dst_png.find_last_of("\\/");
+    if (sl != std::string::npos) SDL_CreateDirectory(dst_png.substr(0, sl).c_str());
+
+    // 1. Direct image file specified as icon_path (.png/.jpg/.jpeg/.bmp)
+    if (!icon_path.empty() && SDL_GetPathInfo(icon_path.c_str(), nullptr)) {
+        if (ends_with_ci(icon_path, ".png")) {
+            size_t n = 0;
+            if (void *d = SDL_LoadFile(icon_path.c_str(), &n)) {
+                std::string tmp = dst_png + ".tmp";
+                bool ok = n > 0 && SDL_SaveFile(tmp.c_str(), d, n) && SDL_RenamePath(tmp.c_str(), dst_png.c_str());
+                if (!ok) SDL_RemovePath(tmp.c_str());
+                SDL_free(d);
+                if (ok) return true;
+            }
+        }
+        // 2. Direct .ico extraction (lossless 256x256 RGBA, zero Explorer shortcut arrow overlay)
+        if (ends_with_ci(icon_path, ".ico") && extract_ico_file_to_png(icon_path, dst_png)) return true;
+    }
+
+    // 3. PrivateExtractIconsW from icon_path (or target .exe) at 256x256 — clean, no shortcut arrow overlay
+    std::string pe_src = (!icon_path.empty() && SDL_GetPathInfo(icon_path.c_str(), nullptr)) ? icon_path : src_path;
+    int pe_idx = (!icon_path.empty() && SDL_GetPathInfo(icon_path.c_str(), nullptr)) ? icon_index : 0;
+    if (!pe_src.empty() && !ends_with_ci(pe_src, ".lnk")) {
+        typedef UINT (WINAPI *PFN_PrivateExtractIconsW)(LPCWSTR, int, int, int, HICON *, UINT *, UINT, UINT);
+        static auto pfn = (PFN_PrivateExtractIconsW)GetProcAddress(GetModuleHandleW(L"user32.dll"), "PrivateExtractIconsW");
+        if (pfn) {
+            std::wstring wp = to_wide(pe_src);
+            for (int sz : {256, 128, 64, 48}) {
+                HICON hi = nullptr;
+                UINT id_out = 0;
+                if (pfn(wp.c_str(), pe_idx, sz, sz, &hi, &id_out, 1, 0) >= 1 && hi) {
+                    bool ok = save_hicon_png(hi, sz, dst_png);
+                    DestroyIcon(hi);
+                    if (ok) return true;
+                }
+            }
+        }
+    }
+
+    // 4. Shell IShellItemImageFactory fallback (handles .ico with non-32bpp/BMP, .lnk, .exe, etc.)
+    std::string shell_src = (!icon_path.empty() && SDL_GetPathInfo(icon_path.c_str(), nullptr)) ? icon_path : src_path;
+    if (shell_src.empty()) return false;
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(co);
+    bool ok = false;
+    if (SUCCEEDED(co) || co == RPC_E_CHANGED_MODE) {
+        IShellItemImageFactory *sif = nullptr;
+        std::wstring ws = to_wide(shell_src);
+        if (SUCCEEDED(SHCreateItemFromParsingName(ws.c_str(), nullptr, IID_IShellItemImageFactory, (void **)&sif)) && sif) {
+            HBITMAP hbmp = nullptr;
+            SIZE sz = {256, 256};
+            if (SUCCEEDED(sif->GetImage(sz, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, &hbmp)) && hbmp) {
+                ok = save_hbitmap_png(hbmp, dst_png);
+                DeleteObject(hbmp);
+            }
+            sif->Release();
+        }
+        if (uninit) CoUninitialize();
+    }
+    return ok;
 }
 
 bool capture_screenshot_png(void *target_hwnd, const std::string &dst_png, int *w_out, int *h_out, bool allow_print_window) {
@@ -884,7 +1160,9 @@ bool startup_is_enabled() { return false; }
 bool startup_set_enabled(bool) { return false; }
 bool recycle_path(const std::string &) { return false; }
 long long folder_size_bytes(const std::string &, int *file_count) { if (file_count) *file_count = 0; return 0; }
-std::string pick_open_file(SDL_Window *, const char *, const char *, const char *) { return {}; }
+std::string pick_open_file(SDL_Window *, const char *, const char *, const char *, bool) { return {}; }
+bool resolve_shortcut(const std::string &, ShortcutInfo &) { return false; }
+bool extract_shortcut_cover(const std::string &, const std::string &, int, const std::string &) { return false; }
 bool zip_folder(const std::string &, const std::string &, int *files_written) { if (files_written) *files_written = 0; return false; }
 const SystemDiag &system_diagnostics() { static SystemDiag d{"Unknown", "Unknown", "Unknown", "", 0}; return d; }
 std::vector<DriveInfo> list_drives() { return {}; }

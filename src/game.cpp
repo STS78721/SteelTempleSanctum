@@ -27,7 +27,7 @@ namespace sanctum {
 
 static const char *kTabs[] = {"Overview", "Release notes", "Settings", "Mods", "Files & storage"};
 static const int kTabN = 5;
-static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0, g_file_row = 0;
+static int g_tab = 0, g_action = 0, g_copy = 0, g_last_game = -1, g_rel = 0, g_file_row = 0, g_set_row = 0;
 static float g_tab_x = 0, g_scroll = 0, g_scroll_to = 0, g_notes_max = 0;
 static int g_notes_game = -1, g_notes_rel = -1;
 static double g_uninstall_armed = -10, g_restore_save_armed = -10, g_clear_shaders_armed = -10, g_sync_pull_armed = -10;
@@ -245,7 +245,7 @@ void game_frame() {
     App &a = app();
     const Palette &p = pal();
     Port &port = ports()[a.game];
-    if (g_last_game != a.game) g_tab = 0, g_action = 0, g_copy = 0, g_row = ROW_ACTIONS, g_rel = 0, g_last_game = a.game;
+    if (g_last_game != a.game) g_tab = 0, g_action = 0, g_copy = 0, g_row = ROW_ACTIONS, g_rel = 0, g_file_row = 0, g_set_row = 0, g_last_game = a.game;
     if (g_copy >= (int)port.installs.size()) g_copy = 0;
     if (g_rel >= (int)port.releases.size()) g_rel = 0;
     const Install *in = port.installs.empty() ? nullptr : &port.installs[g_copy];
@@ -376,6 +376,29 @@ void game_frame() {
     // ---- input
     bool copies_here = g_tab == 0 && port.installs.size() > 1;
     bool notes_here = g_tab == 1 && !port.releases.empty();
+    // settings tab rows (needed for Up/Down/A handling)
+    struct SetRow { std::string head, sub; int id; };
+    enum { S_PORT_SETTINGS, S_LAUNCH_ARGS, S_LAUNCH_ENV };
+    std::vector<SetRow> srows;
+    if (g_tab == 2 && in) {
+        const PortSettings *ps = port_settings(port.id);
+        bool has_ps = ps != nullptr;
+        if (has_ps || (!port.custom && port.launcher)) {
+            std::string head = has_ps ? std::string(port.name) + " settings" : std::string(port.name) + "'s settings are in its own launcher";
+            std::string sub = has_ps ? std::to_string(ps->count) + " settings on " + std::to_string(ps->pages.size()) + " pages, as in the game's own menu" +
+                                           (port_settings_changed(a.game) ? "  ·  " + std::to_string(port_settings_changed(a.game)) + " set by you" : "")
+                                     : "A opens its launcher's settings.";
+            srows.push_back({std::move(head), std::move(sub), S_PORT_SETTINGS});
+        }
+        auto arg_it = cfg().launch_args.find(port.id);
+        std::string cur_args = arg_it == cfg().launch_args.end() ? "" : arg_it->second;
+        srows.push_back({"Launch options", cur_args.empty() ? "None  ·  Add flags like -dx12, -fullscreen, -novid, or KEY=VAL %command% ..." : cur_args, S_LAUNCH_ARGS});
+        auto env_it = cfg().launch_env.find(port.id);
+        std::string cur_env = env_it == cfg().launch_env.end() ? "" : env_it->second;
+        srows.push_back({"Environment variables", cur_env.empty() ? "None  ·  Optional overrides (KEY=VALUE;OTHER=1)" : cur_env, S_LAUNCH_ENV});
+        if (g_set_row >= (int)srows.size()) g_set_row = std::max(0, (int)srows.size() - 1);
+    }
+
     // files & storage action list (needed for Up/Down/A handling)
     struct FileRow { std::string label, value; int id; };
     enum { F_OPEN_DIR, F_OPEN_LOGS, F_VERIFY, F_CLEAR_SHADERS, F_PREWARM_SHADERS,
@@ -791,7 +814,7 @@ void game_frame() {
     case NAV_DOWN:
         if (g_row == ROW_ACTIONS && copies_here) { g_row = ROW_COPIES; sound_play(SFX_MOVE); }
         else if (g_row == ROW_ACTIONS && notes_here) { g_row = ROW_RELEASES; sound_play(SFX_MOVE); }
-        else if (g_row == ROW_ACTIONS && g_tab == 2 && in) { g_row = ROW_SETTINGS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_ACTIONS && g_tab == 2 && in && !srows.empty()) { g_row = ROW_SETTINGS, g_set_row = 0; sound_play(SFX_MOVE); }
         else if (g_row == ROW_ACTIONS && g_tab == 3 && in) { g_row = ROW_MODS; sound_play(SFX_MOVE); }
         else if (g_row == ROW_ACTIONS && g_tab == 4 && in && !frows.empty()) { g_row = ROW_FILES, g_file_row = 0; sound_play(SFX_MOVE); }
         else if (g_row == ROW_COPIES) {
@@ -803,6 +826,9 @@ void game_frame() {
         } else if (g_row == ROW_NOTES) {
             bool at_end = g_notes_game == a.game && g_notes_rel == g_rel && g_scroll_to >= g_notes_max;
             if (!at_end) { g_scroll_to += 90; sound_play(SFX_KEY); }
+            else sound_play(SFX_EDGE);
+        } else if (g_row == ROW_SETTINGS) {
+            if (g_set_row < (int)srows.size() - 1) { g_set_row++; sound_play(SFX_MOVE); }
             else sound_play(SFX_EDGE);
         } else if (g_row == ROW_FILES) {
             if (g_file_row < (int)frows.size() - 1) { g_file_row++; sound_play(SFX_MOVE); }
@@ -818,12 +844,13 @@ void game_frame() {
             if (g_scroll_to > 0) { g_scroll_to = std::max(0.0f, g_scroll_to - 90); sound_play(SFX_KEY); }
             else sound_play(SFX_EDGE);
         }
-        else if (g_row == ROW_SETTINGS || g_row == ROW_MODS) { g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_SETTINGS) { if (g_set_row > 0) g_set_row--; else g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
+        else if (g_row == ROW_MODS) { g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
         else if (g_row == ROW_FILES) { if (g_file_row > 0) g_file_row--; else g_row = ROW_ACTIONS; sound_play(SFX_MOVE); }
         else sound_play(SFX_EDGE);
         break;
-    case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; g_file_row = 0; sound_play(SFX_TAB); break;
-    case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; g_file_row = 0; sound_play(SFX_TAB); break;
+    case NAV_L: g_tab = (g_tab + kTabN - 1) % kTabN; g_row = ROW_ACTIONS; g_file_row = 0; g_set_row = 0; sound_play(SFX_TAB); break;
+    case NAV_R: g_tab = (g_tab + 1) % kTabN; g_row = ROW_ACTIONS; g_file_row = 0; g_set_row = 0; sound_play(SFX_TAB); break;
     case NAV_A:
         if (g_row == ROW_COPIES) {   // remembered: Play starts this copy from now on
             catalog_prefer(a.game, port.installs[g_copy].dir);
@@ -994,7 +1021,7 @@ void game_frame() {
     float tx = x;
     for (int i = 0; i < kTabN; ++i) {
         float w = text_w(17, kTabs[i]) + 32;
-        if (a.clicked && hover(tx, 352, w, 40)) { if (g_tab != i) sound_play(SFX_TAB); g_tab = i, g_row = ROW_ACTIONS; }
+        if (a.clicked && hover(tx, 352, w, 40)) { if (g_tab != i) sound_play(SFX_TAB); g_tab = i, g_row = ROW_ACTIONS, g_file_row = 0, g_set_row = 0; }
         text(tx + 16, 360, 17, i == g_tab ? p.text : p.dim, kTabs[i]);
         if (i == g_tab) g_tab_x = ease(g_tab_x, tx, 20);
         tx += w;
@@ -1107,28 +1134,41 @@ void game_frame() {
         }
         break;
     }
-    case 2: {   // the port's own settings, in its own page
-        const PortSettings *ps = port_settings(port.id);
+    case 2: {   // Settings: port settings (if available) + Steam-style Launch options & Environment variables
         if (!in) { text(x, by, 17, p.soft, "Install the port to change its settings here."); break; }
-        bool has = ps != nullptr;
-        std::string head = has ? std::string(port.name) + " settings" : std::string(port.name) + "'s settings are in its own launcher";
-        std::string sub = has ? std::to_string(ps->count) + " settings on " + std::to_string(ps->pages.size()) + " pages, as in the game's own menu" +
-                                    (port_settings_changed(a.game) ? "  ·  " + std::to_string(port_settings_changed(a.game)) + " set by you" : "")
-                              : "Sanctum does not have a list for this port yet; A opens its launcher's settings.";
-        if (hover(x, by, 780, 74)) {
-            if (a.mouse_moved && !a.clicked && g_row != ROW_SETTINGS) { g_row = ROW_SETTINGS; sound_play(SFX_MOVE); }
-            if (a.clicked) g_row = ROW_SETTINGS, a.nav = NAV_A;
+        auto trigger_set = [&](int sid) {
+            if (sid == S_PORT_SETTINGS) {
+                if (port_settings(port.id)) port_settings_open(a.game);
+                else if (port.launcher) launch(a.window, a.game, *in, true);
+            } else if (sid == S_LAUNCH_ARGS) {
+                if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: launch options unchanged"); return; }
+                auto it = cfg().launch_args.find(port.id);
+                prompt_start(0, port.id, it == cfg().launch_args.end() ? "" : it->second);
+                sound_play(SFX_OK);
+            } else if (sid == S_LAUNCH_ENV) {
+                if (demo_mode()) { sound_play(SFX_ERROR); toast("Demo mode: environment unchanged"); return; }
+                auto it = cfg().launch_env.find(port.id);
+                prompt_start(1, port.id, it == cfg().launch_env.end() ? "" : it->second);
+                sound_play(SFX_OK);
+            }
+        };
+        for (int i = 0; i < (int)srows.size(); ++i) {
+            float ry = by + i * 82.0f;
+            bool foc = g_row == ROW_SETTINGS && g_set_row == i;
+            if (hover(x, ry, 780, 72)) {
+                if (a.mouse_moved && !a.clicked && (!foc)) { g_row = ROW_SETTINGS; g_set_row = i; sound_play(SFX_MOVE); }
+                if (a.clicked) { g_row = ROW_SETTINGS; g_set_row = i; trigger_set(srows[i].id); break; }
+            }
+            rect(x, ry, 780, 72, p.panel, 14);
+            rect(x, ry, 6, 72, srows[i].id == S_PORT_SETTINGS ? port.colours.accent : p.accent, 3);
+            icon(srows[i].id == S_PORT_SETTINGS ? IC_GEAR : srows[i].id == S_LAUNCH_ARGS ? IC_PLAY : IC_SEARCH,
+                 x + 40, ry + 36, 24, srows[i].id == S_PORT_SETTINGS ? port.colours.accent : p.soft);
+            text(x + 72, ry + 13, 18, p.text, srows[i].head.c_str());
+            text(x + 72, ry + 41, 14, p.soft, fit(14, srows[i].sub, 684).c_str());
+            if (foc) focus_ring(x, ry, 780, 72, 14, 4);
         }
-        rect(x, by, 780, 74, p.panel, 14);
-        rect(x, by, 6, 74, port.colours.accent, 3);
-        icon(IC_GEAR, x + 40, by + 37, 26, port.colours.accent);
-        text(x + 72, by + 14, 18, p.text, head.c_str());
-        text(x + 72, by + 42, 14, p.soft, fit(14, sub, 680).c_str());
-        if (g_row == ROW_SETTINGS) focus_ring(x, by, 780, 74, 14, 4);
-        if (g_row == ROW_SETTINGS && a.nav == NAV_A) {
-            if (has) port_settings_open(a.game);
-            else if (port.launcher) launch(a.window, a.game, *in, true);
-        }
+        if (g_row == ROW_SETTINGS && a.nav == NAV_A && g_set_row >= 0 && g_set_row < (int)srows.size())
+            trigger_set(srows[g_set_row].id);
         break;
     }
     case 3: {   // Mods
@@ -1201,7 +1241,14 @@ void game_frame() {
     if (g_row == ROW_COPIES) hint_bar({{NAV_A, "Use this copy"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_RELEASES && rel_installable) hint_bar({{NAV_A, "Read"}, {NAV_X, "Install version"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_RELEASES) hint_bar({{NAV_A, "Read"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
-    else if (g_row == ROW_SETTINGS) hint_bar({{NAV_A, "Open settings"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+    else if (g_row == ROW_SETTINGS) {
+        const char *slbl = "Open settings";
+        if (g_set_row >= 0 && g_set_row < (int)srows.size()) {
+            if (srows[g_set_row].id == F_LAUNCH_ARGS) slbl = "Edit launch options";
+            else if (srows[g_set_row].id == F_LAUNCH_ENV) slbl = "Edit env vars";
+        }
+        hint_bar({{NAV_A, slbl}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
+    }
     else if (g_row == ROW_MODS) hint_bar({{NAV_A, "Open mods"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_FILES) hint_bar({{NAV_A, "OK"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else if (g_row == ROW_NOTES && rel_installable) hint_bar({{NAV_X, "Install version"}, {NAV_Y, "Open on GitHub"}, {NAV_B, "Back to the list"}});
@@ -1209,22 +1256,73 @@ void game_frame() {
     else if (port.custom) hint_bar({{NAV_A, acts[g_action].label.substr(0, acts[g_action].label.find("  ")).c_str()}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
     else hint_bar({{NAV_A, acts[g_action].label.substr(0, acts[g_action].label.find("  ")).c_str()}, {NAV_Y, "GitHub"}, {NAV_L, "Tabs"}, {NAV_B, "Back"}});
 
-    // Inline text-input modal for custom launch args / env overrides
+    // Inline text-input modal for Steam-style launch options / env overrides
     if (g_prompt_open) {
+        auto append_clean = [&](const std::string &src) {
+            for (char c : src)
+                if ((unsigned char)c >= 0x20 && c != '\r' && c != '\n' && g_prompt_buf.size() < 1024) g_prompt_buf += c;
+        };
         if (!a.typed.empty()) {
-            for (char c : a.typed)
-                if ((unsigned char)c >= 0x20 && g_prompt_buf.size() < 240) g_prompt_buf += c;
+            append_clean(a.typed);
             sound_play(SFX_KEY);
         }
         if (a.key_back && !g_prompt_buf.empty()) { g_prompt_buf.pop_back(); sound_play(SFX_KEY); }
+        bool paste = false;
+        {
+            static bool prev_v = false;
+            int nkeys = 0;
+            const bool *ks = SDL_GetKeyboardState(&nkeys);
+            bool ctrl = ks && nkeys > SDL_SCANCODE_RCTRL && (ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL]);
+            bool vdown = ctrl && ks && nkeys > SDL_SCANCODE_V && ks[SDL_SCANCODE_V];
+            if (vdown && !prev_v) paste = true;
+            prev_v = vdown;
+        }
         bool save = a.key_enter || modal_nav == NAV_A;
         bool cancel = a.key_escape || modal_nav == NAV_B;
         bool clear = modal_nav == NAV_Y;
-        float mw = 720, mh = 240, mx = 640 - mw / 2, my = 360 - mh / 2;
+        float mw = 780, mh = g_prompt_kind == 0 ? 296.0f : 244.0f;
+        float mx = 640 - mw / 2, my = 360 - mh / 2;
+
+        static const char *const kPresets[] = {"-dx12", "-dx11", "-vulkan", "-fullscreen", "-windowed", "-novid"};
         if (modal_click) {
             if (hover(mx + mw - 140, my + mh - 64, 116, 42)) save = true;
             else if (hover(mx + mw - 268, my + mh - 64, 116, 42)) clear = true;
+            else if (hover(mx + mw - 396, my + mh - 64, 116, 42)) paste = true;
             else if (hover(mx + 24, my + mh - 64, 116, 42) || !hover(mx, my, mw, mh)) cancel = true;
+            else if (g_prompt_kind == 0) {
+                float cx = mx + 28, cy = my + 160;
+                for (const char *fl : kPresets) {
+                    float cw = text_w(13, fl) + 24;
+                    if (hover(cx, cy, cw, 30)) {
+                        // Toggle flag token in g_prompt_buf
+                        std::string needle = fl;
+                        size_t pos = g_prompt_buf.find(needle);
+                        bool match = pos != std::string::npos &&
+                                     (pos == 0 || g_prompt_buf[pos - 1] == ' ') &&
+                                     (pos + needle.size() == g_prompt_buf.size() || g_prompt_buf[pos + needle.size()] == ' ');
+                        if (match) {
+                            size_t rm_len = needle.size();
+                            if (pos + rm_len < g_prompt_buf.size() && g_prompt_buf[pos + rm_len] == ' ') rm_len++;
+                            else if (pos > 0 && g_prompt_buf[pos - 1] == ' ') { pos--; rm_len++; }
+                            g_prompt_buf.erase(pos, rm_len);
+                            sound_play(SFX_TOGGLE_OFF);
+                        } else {
+                            if (!g_prompt_buf.empty() && g_prompt_buf.back() != ' ') g_prompt_buf += ' ';
+                            append_clean(needle);
+                            sound_play(SFX_TOGGLE_ON);
+                        }
+                        break;
+                    }
+                    cx += cw + 8;
+                }
+            }
+        }
+        if (paste) {
+            if (char *clip = SDL_GetClipboardText()) {
+                append_clean(clip);
+                SDL_free(clip);
+                sound_play(SFX_KEY);
+            }
         }
         if (clear) { g_prompt_buf.clear(); sound_play(SFX_BACK); }
         if (save) {
@@ -1234,23 +1332,41 @@ void game_frame() {
             config_save();
             prompt_close();
             sound_play(SFX_TOGGLE_ON);
-            toast(g_prompt_kind == 0 ? "Saved custom launch arguments" : "Saved custom environment variables");
+            toast(g_prompt_kind == 0 ? "Saved launch options" : "Saved environment variables");
         } else if (cancel) {
             prompt_close();
             sound_play(SFX_BACK);
         } else {
             rect(0, 0, 1280, 720, IM_COL32(0, 0, 0, 155));
             rect(mx, my, mw, mh, p.bg2, 20);
-            text(mx + 28, my + 22, 22, p.text, g_prompt_kind == 0 ? "Custom launch arguments" : "Custom environment variables");
+            text(mx + 28, my + 22, 22, p.text, g_prompt_kind == 0 ? "Launch options" : "Environment variables");
             text(mx + 28, my + 54, 14, p.soft,
-                 g_prompt_kind == 0 ? "Example: --windowed --fps=120  (type on keyboard, Enter saves)"
-                                    : "Example: KEY=VALUE;OTHER=1  (separated by semicolons, Enter saves)");
+                 g_prompt_kind == 0 ? "Example: -dx12 -fullscreen  or  KEY=VAL %command% -novid  (Ctrl+V pastes, Enter saves)"
+                                    : "Example: KEY=VALUE;OTHER=1  (separated by semicolons, Ctrl+V pastes, Enter saves)");
             rect(mx + 28, my + 90, mw - 56, 52, p.panel, 12);
             frame(mx + 28, my + 90, mw - 56, 52, p.focus, 12, 2.5f);
-            std::string shown = g_prompt_buf + (std::fmod(a.now, 1.0) < 0.5 ? "|" : "");
+            std::string tail = g_prompt_buf;
+            if (tail.size() > 74) tail = "..." + tail.substr(tail.size() - 71);
+            std::string shown = tail + (std::fmod(a.now, 1.0) < 0.5 ? "|" : "");
             text(mx + 44, my + 106, 17, p.text, fit(17, shown, mw - 88).c_str());
+            if (g_prompt_kind == 0) {
+                float cx = mx + 28, cy = my + 160;
+                for (const char *fl : kPresets) {
+                    float cw = text_w(13, fl) + 24;
+                    std::string needle = fl;
+                    size_t pos = g_prompt_buf.find(needle);
+                    bool on = pos != std::string::npos &&
+                              (pos == 0 || g_prompt_buf[pos - 1] == ' ') &&
+                              (pos + needle.size() == g_prompt_buf.size() || g_prompt_buf[pos + needle.size()] == ' ');
+                    rect(cx, cy, cw, 30, on ? p.accent : p.panel, 15);
+                    text(cx + cw * 0.5f, cy + 7, 13, on ? IM_COL32_WHITE : p.soft, fl, 0.5f);
+                    cx += cw + 8;
+                }
+            }
             rect(mx + 24, my + mh - 64, 116, 42, p.panel, 21);
             text(mx + 82, my + mh - 52, 16, p.soft, "Cancel", 0.5f);
+            rect(mx + mw - 396, my + mh - 64, 116, 42, p.panel, 21);
+            text(mx + mw - 338, my + mh - 52, 16, p.soft, "Paste", 0.5f);
             rect(mx + mw - 268, my + mh - 64, 116, 42, p.panel, 21);
             text(mx + mw - 210, my + mh - 52, 16, p.warn, "Clear", 0.5f);
             rect(mx + mw - 140, my + mh - 64, 116, 42, p.accent, 21);

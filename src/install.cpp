@@ -522,7 +522,15 @@ static void run(Job &j) {
     err = unzip(file, stage, j.cancel);
     if (!err.empty()) { remove_tree(stage); set_phase(j, j.cancel ? PH_CANCELLED : PH_FAILED, err); return; }
     std::string root = find_root(stage, port, 3);
-    if (root.empty()) root = stage;   // an Update.zip may carry only what changed, without the program
+    if (root.empty()) {
+        // Partial Update.zip archives without the main exe may still wrap files in a single top-level folder (e.g. PortName/)
+        root = stage;
+        for (int depth = 0; depth < 2; ++depth) {
+            auto entries = list(root);
+            if (entries.size() == 1 && is_dir(root + "\\" + entries[0])) root += "\\" + entries[0];
+            else break;
+        }
+    }
 
     std::string dest;
     bool backed_up_saves = false;
@@ -551,6 +559,14 @@ static void run(Job &j) {
             set_phase(j, PH_RELINK);
             relinked = try_auto_relink(port, dest, j.cancel);
         }
+    }
+
+    // Write authoritative .sanctum-version stamp AFTER relink so hotfix/no-VERSION/un-relinked updates never loop
+    if (!j.rel.tag.empty()) {
+        std::string sv = j.rel.tag + "\n";
+        std::string sp = dest + "\\.sanctum-version";
+        std::string stmp = sp + ".tmp";
+        if (SDL_SaveFile(stmp.c_str(), sv.data(), sv.size())) SDL_RenamePath(stmp.c_str(), sp.c_str());
     }
 
     std::lock_guard<std::mutex> l(g_lock);
@@ -630,9 +646,18 @@ bool install_queued(int port) {
     return false;
 }
 
-static void registry_version(const char *key, const std::string &tag) {
-    if (!key) return;
+static void registry_version_if_matches(const char *key, const std::string &dir, const std::string &tag) {
+    if (!key || !*key || tag.empty()) return;
     std::wstring sub = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + W(key);
+    wchar_t loc[1024]{};
+    DWORD sz = sizeof loc;
+    if (RegGetValueW(HKEY_CURRENT_USER, sub.c_str(), L"InstallLocation", RRF_RT_REG_SZ, nullptr, loc, &sz) != ERROR_SUCCESS)
+        return;
+    std::wstring wl(loc);
+    while (!wl.empty() && (wl.back() == L'\\' || wl.back() == L'/')) wl.pop_back();
+    std::wstring wd = W(dir);
+    while (!wd.empty() && (wd.back() == L'\\' || wd.back() == L'/')) wd.pop_back();
+    if (_wcsicmp(wl.c_str(), wd.c_str()) != 0) return;
     std::wstring v = W(tag);
     RegSetKeyValueW(HKEY_CURRENT_USER, sub.c_str(), L"DisplayVersion", REG_SZ, v.c_str(), (DWORD)((v.size() + 1) * sizeof(wchar_t)));
 }
@@ -650,13 +675,14 @@ void install_poll(SDL_Window *w) {
     for (auto &f : done) {
         Port &p = ports()[f.port];
         if (f.kind == JOB_WIZARD) {
-            scan_start();   // the setup chose the folder: find it
+            catalog_invalidate_version(f.port);
+            scan_start();          // the setup chose the folder: find it
+            version_probe_start(); // re-probe updated exe even if installed over an existing folder
             toast(std::string(p.name) + ": setup finished, looking for it on this PC", 3.5);
             continue;
         }
         if (f.kind == JOB_UPDATE)
-            for (auto &in : p.all)
-                if (in.dir == f.dir && in.registered) registry_version(p.uninstall_key, f.version);
+            registry_version_if_matches(p.uninstall_key, f.dir, f.version);
         catalog_installed(f.port, f.dir, f.version);
         bool needs_relink = false;
         if (f.kind == JOB_UPDATE && !f.relinked && p.launcher && p.exe) {
@@ -673,7 +699,7 @@ void install_poll(SDL_Window *w) {
             toast(std::string(p.name) + " updated to " + f.version + " — open Port's own launcher once to relink " + p.exe, 5.0);
         else
             toast(std::string(p.name) + (f.kind == JOB_UPDATE ? " updated to " : " installed: ") + f.version, 3.5);
-        if (f.relinked) version_probe_start();
+        version_probe_start();
     }
 }
 

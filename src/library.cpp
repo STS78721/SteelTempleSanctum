@@ -61,7 +61,8 @@ static void add_custom_game_action() {
         toast("Demo mode: custom games unchanged");
         return;
     }
-    std::string exe = pick_open_file(app().window, "Choose a PC game executable", "Programs", "*.exe");
+    std::string exe = pick_open_file(app().window, "Choose a game executable or shortcut (.exe, .lnk)",
+                                     "Games & Shortcuts", "*.exe;*.lnk;*.bat;*.cmd", true);
     if (exe.empty()) return;
     int idx = catalog_add_custom(exe);
     if (idx >= 0) {
